@@ -187,11 +187,23 @@ def init_db() -> None:
         );
         """)
 
+        # 9. App Settings Table (for Gmail SMTP credentials and system configurations)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+
         # Indexes for fast lookup
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_status ON candidates(workflow_status);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_email ON candidates(email);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON interview_sessions(token);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_candidate ON interview_sessions(candidate_id);")
+
+        # Migration: Ensure all candidate emails are valid @gmail.com addresses
+        cursor.execute("UPDATE candidates SET email = REPLACE(email, '@example.com', '@gmail.com') WHERE email LIKE '%@example.com';")
 
         conn.commit()
 
@@ -295,13 +307,13 @@ Senior Backend Engineer | ScalePoint Technologies (2022 - Present)
                 "CAND-SE-4421",
                 "JOB-SE-01",
                 "Alex Chen",
-                "alex.chen@example.com",
+                "alex.chen.dev99@gmail.com",
                 "Backend Platform & Infrastructure",
                 5,
                 92,
                 json.dumps(["Python", "FastAPI", "Redis", "Docker", "Kubernetes", "AWS"]),
                 "Built distributed RAG pipelines reducing query latency from 1.8s to 240ms; orchestrated Kubernetes clusters handling 25k RPS.",
-                sukrit_resume.replace("Sukrit Sharma", "Alex Chen").replace("sukrit.ss.31@gmail.com", "alex.chen@example.com"),
+                sukrit_resume.replace("Sukrit Sharma", "Alex Chen").replace("sukrit.ss.31@gmail.com", "alex.chen.dev99@gmail.com"),
                 "SHORTLISTED",
                 "SHORTLISTED",
                 now,
@@ -311,13 +323,13 @@ Senior Backend Engineer | ScalePoint Technologies (2022 - Present)
                 "CAND-DE-3912",
                 "JOB-DE-02",
                 "Marcus Vance",
-                "marcus.devops@example.com",
+                "marcus.devops.cloud@gmail.com",
                 "Cloud & Reliability",
                 6,
                 95,
                 json.dumps(["Kubernetes", "AWS", "Terraform", "Docker", "CI/CD", "Prometheus", "Helm"]),
                 "Designed multi-region AWS EKS clusters with 99.99% uptime; automated zero-downtime canary deployments via GitHub Actions and Terraform.",
-                "Marcus Vance\nEmail: marcus.devops@example.com\nLead DevOps Engineer with 6+ years experience in Kubernetes, Terraform, AWS, and Prometheus.",
+                "Marcus Vance\nEmail: marcus.devops.cloud@gmail.com\nLead DevOps Engineer with 6+ years experience in Kubernetes, Terraform, AWS, and Prometheus.",
                 "SHORTLISTED",
                 "SHORTLISTED",
                 now,
@@ -327,13 +339,13 @@ Senior Backend Engineer | ScalePoint Technologies (2022 - Present)
                 "CAND-AI-7721",
                 "JOB-AI-03",
                 "Dr. Priya Nair",
-                "priya.ai@example.com",
+                "priya.ai.systems@gmail.com",
                 "Machine Learning & AI",
                 4,
                 94,
                 json.dumps(["PyTorch", "LangChain", "RAG", "Vector DB", "ChromaDB", "Python", "FastAPI"]),
                 "Architected enterprise RAG system with ChromaDB and LangChain; fine-tuned open-source LLMs reducing hallucination rates by 38%.",
-                "Dr. Priya Nair\nEmail: priya.ai@example.com\nSenior AI/ML Engineer with expertise in PyTorch, LangChain, RAG, and Vector Databases.",
+                "Dr. Priya Nair\nEmail: priya.ai.systems@gmail.com\nSenior AI/ML Engineer with expertise in PyTorch, LangChain, RAG, and Vector Databases.",
                 "SHORTLISTED",
                 "SHORTLISTED",
                 now,
@@ -343,13 +355,13 @@ Senior Backend Engineer | ScalePoint Technologies (2022 - Present)
                 "CAND-FE-5510",
                 "JOB-FE-04",
                 "David Kim",
-                "david.frontend@example.com",
+                "david.frontend.arch@gmail.com",
                 "Product Engineering",
                 5,
                 91,
                 json.dumps(["React", "TypeScript", "Next.js", "Redux", "TailwindCSS", "Web Vitals"]),
                 "Led Next.js migration improving Largest Contentful Paint (LCP) by 48%; developed enterprise component design system in TypeScript.",
-                "David Kim\nEmail: david.frontend@example.com\nSenior Frontend Engineer specialized in React, Next.js, TypeScript, and UI performance.",
+                "David Kim\nEmail: david.frontend.arch@gmail.com\nSenior Frontend Engineer specialized in React, Next.js, TypeScript, and UI performance.",
                 "SHORTLISTED",
                 "SHORTLISTED",
                 now,
@@ -359,13 +371,13 @@ Senior Backend Engineer | ScalePoint Technologies (2022 - Present)
                 "CAND-CD-9014",
                 "JOB-CD-05",
                 "Elena Rostova",
-                "elena.data@example.com",
+                "elena.data.platform@gmail.com",
                 "Data & Analytics",
                 6,
                 93,
                 json.dumps(["Kafka", "Apache Spark", "Snowflake", "Python", "Airflow", "AWS Glue"]),
                 "Orchestrated real-time streaming pipeline processing 40M daily events with Kafka and Spark; designed Snowflake lakehouse models.",
-                "Elena Rostova\nEmail: elena.data@example.com\nSenior Data Platform Engineer with expertise in Apache Kafka, Spark, Snowflake, and Airflow.",
+                "Elena Rostova\nEmail: elena.data.platform@gmail.com\nSenior Data Platform Engineer with expertise in Apache Kafka, Spark, Snowflake, and Airflow.",
                 "SHORTLISTED",
                 "SHORTLISTED",
                 now,
@@ -575,4 +587,25 @@ def insert_or_replace_candidate(
             conn.commit()
             log_audit_event("candidate", candidate_id, "CREATED_SHORTLISTED", "Admin", f"Ingested and shortlisted {name} ({email}) under {job_id}")
             return {"id": candidate_id, "action": "created"}
+
+
+def get_app_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    """Retrieves a persistent setting value from the app_settings table."""
+    init_db()
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = ?;", (key,)).fetchone()
+        return row[0] if row else default
+
+
+def set_app_setting(key: str, value: str) -> None:
+    """Saves or updates a persistent setting in the app_settings table."""
+    init_db()
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute("""
+        INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+        """, (key, value, now))
+        conn.commit()
+
 

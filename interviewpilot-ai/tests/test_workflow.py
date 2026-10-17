@@ -280,10 +280,10 @@ def test_resume_upload_and_profile_matching():
     from demo_data import SAMPLE_DEVOPS_RESUME, SAMPLE_AI_RESUME, SAMPLE_NONMATCHING_CHEF_RESUME
     from database import get_candidate_details
 
-    # Test 1: DevOps Resume Upload -> Correct Profile Matching
+    # Test 1: DevOps Resume Upload -> Correct Profile Matching with @gmail.com
     print("\n[Upload Test 1] Uploading and analyzing DevOps Engineer Resume...")
-    res_devops = match_resume_to_profiles(SAMPLE_DEVOPS_RESUME, override_name="David Ross", override_email="david.ross.devops@example.com")
-    assert res_devops["matched"] is True, "DevOps resume should have matched an open role."
+    res_devops = match_resume_to_profiles(SAMPLE_DEVOPS_RESUME, override_name="David Ross", override_email="david.ross.devops@gmail.com")
+    assert res_devops["matched"] is True, f"DevOps resume should have matched an open role: {res_devops.get('reason')}"
     assert "DevOps" in res_devops["matched_job"]["job_title"], f"Expected DevOps role, got {res_devops['matched_job']['job_title']}"
     assert res_devops["match_score"] >= 80, f"Expected match score >= 80, got {res_devops['match_score']}"
     assert len(res_devops["matched_skills"]) >= 4
@@ -294,12 +294,13 @@ def test_resume_upload_and_profile_matching():
     assert db_cand is not None
     assert db_cand["name"] == "David Ross"
     assert db_cand["workflow_status"] == "SHORTLISTED"
+    assert db_cand["email"] == "david.ross.devops@gmail.com"
     assert len(db_cand["resume_text"]) > 200, "Resume text must be persisted for downloading."
     print("✓ Candidate profile successfully bucketed into Lead DevOps role; resume text ready for download.")
 
     # Test 2: AI Systems Resume Upload -> Correct Profile Matching
     print("\n[Upload Test 2] Uploading and analyzing AI/ML Systems Engineer Resume...")
-    res_ai = match_resume_to_profiles(SAMPLE_AI_RESUME, override_name="Anita Roy", override_email="anita.roy.ai@example.com")
+    res_ai = match_resume_to_profiles(SAMPLE_AI_RESUME, override_name="Anita Roy", override_email="anita.roy.ai@gmail.com")
     assert res_ai["matched"] is True, "AI resume should match AI Systems role."
     assert "AI" in res_ai["matched_job"]["job_title"], f"Expected AI role, got {res_ai['matched_job']['job_title']}"
     assert res_ai["match_score"] >= 80
@@ -307,22 +308,29 @@ def test_resume_upload_and_profile_matching():
 
     # Test 3: Non-Matching Resume -> Correct Rejection & Profile Mismatch Flag
     print("\n[Upload Test 3] Uploading Non-Matching Resume (Executive Chef)...")
-    res_chef = match_resume_to_profiles(SAMPLE_NONMATCHING_CHEF_RESUME, override_name="Chef Marco Pierre", override_email="marco.pierre@culinaryart.com")
+    res_chef = match_resume_to_profiles(SAMPLE_NONMATCHING_CHEF_RESUME, override_name="Chef Marco Pierre", override_email="marco.pierre.chef@gmail.com")
     assert res_chef["matched"] is False, "Culinary resume should NOT match any technical role."
     assert res_chef["best_score"] < 50, f"Expected non-matching score < 50%, got {res_chef['best_score']}%"
     assert "does not match any open profile" in res_chef["reason"]
     assert len(res_chef["all_evaluations"]) == 5, "Should evaluate fit across all 5 open roles."
     print(f"✓ Correctly rejected non-matching resume: '{res_chef['reason']}'")
 
-    # Test 4: Approval & Link Generation for Uploaded Candidate
-    print("\n[Upload Test 4] Admin approves uploaded candidate (David Ross) for interview...")
+    # Test 4: Rejection of Non-Gmail Email Address
+    print("\n[Upload Test 4] Testing strict validation of non-@gmail.com address...")
+    res_nongmail = match_resume_to_profiles(SAMPLE_DEVOPS_RESUME, override_name="Invalid Domain", override_email="david@yahoo.com")
+    assert res_nongmail["matched"] is False
+    assert "not a valid @gmail.com address" in res_nongmail["reason"]
+    print("✓ Non-@gmail.com address strictly rejected as expected.")
+
+    # Test 5: Approval & Link Generation for Uploaded Candidate
+    print("\n[Upload Test 5] Admin approves uploaded candidate (David Ross) for interview...")
     app_res = approve_for_first_round(res_devops["candidate_id"])
     assert app_res["status"] == "success"
     assert "http://localhost:8501/?token=" in app_res["interview_url"]
     print(f"✓ Generated interview link: {app_res['interview_url']}")
 
-    # Test 5: Candidate Accesses Screening Room via Generated Link
-    print("\n[Upload Test 5] Candidate accesses interview portal with new link...")
+    # Test 6: Candidate Accesses Screening Room via Generated Link
+    print("\n[Upload Test 6] Candidate accesses interview portal with new link...")
     cand_val = validate_candidate_interview_token(app_res["token"])
     assert cand_val["valid"] is True
     assert cand_val["session"]["candidate_name"] == "David Ross"
@@ -334,7 +342,99 @@ def test_resume_upload_and_profile_matching():
     print("=================================================================")
 
 
+def test_recruiter_decision_actions_and_hold_restrictions():
+    print("\n=================================================================")
+    print("   RUNNING RECRUITER DECISIONS & ROUND 2 HOLD RESTRICTION TESTS  ")
+    print("=================================================================")
+    from pipeline_manager import (
+        approve_for_second_round,
+        place_candidate_on_hold,
+        mark_candidate_under_review,
+        reject_candidate,
+        approve_for_first_round
+    )
+    from database import get_candidate_details, get_db_connection, get_all_email_logs
+
+    # Test 1: Candidate approved for second round cannot be placed on hold
+    print("\n[Decision Test 1] Verifying candidate approved for Round 2 cannot be placed On Hold...")
+    sukrit = get_candidate_details("CAND-SE-8109")
+    assert sukrit["workflow_status"] == "SECOND_ROUND_APPROVED"
+
+    hold_attempt = place_candidate_on_hold("CAND-SE-8109", reviewer="Admin")
+    assert hold_attempt["status"] == "error", "Should error when attempting to place a Round 2 approved candidate on hold."
+    assert "Cannot place on hold" in hold_attempt["message"]
+    print("✓ Correctly prevented placing Round 2 approved candidate on hold.")
+
+    # Test 2: Candidate approved for second round cannot be rejected
+    print("\n[Decision Test 2] Verifying candidate approved for Round 2 cannot be rejected...")
+    reject_attempt = reject_candidate("CAND-SE-8109", reviewer="Admin")
+    assert reject_attempt["status"] == "error"
+    assert "Cannot reject" in reject_attempt["message"]
+    print("✓ Correctly prevented rejecting candidate who cleared Round 1.")
+
+    # Test 3: Putting a completed candidate under human review
+    print("\n[Decision Test 3] Putting a completed candidate under human review...")
+    # Use Marcus Vance (CAND-DE-3912)
+    with get_db_connection() as conn:
+        conn.execute("UPDATE candidates SET workflow_status = 'COMPLETED' WHERE id = 'CAND-DE-3912';")
+        conn.commit()
+
+    rev_res = mark_candidate_under_review("CAND-DE-3912", reviewer="Admin_Abhinav", notes="Need second senior engineer opinion")
+    assert rev_res["status"] == "success", f"Mark under review failed: {rev_res}"
+    assert rev_res["workflow_status"] == "HUMAN_REVIEW_REQUIRED"
+
+    cand_mv = get_candidate_details("CAND-DE-3912")
+    assert cand_mv["workflow_status"] == "HUMAN_REVIEW_REQUIRED"
+    print(f"✓ Candidate {cand_mv['name']} transitioned to HUMAN_REVIEW_REQUIRED.")
+
+    # Test 4: Placing candidate on hold
+    print("\n[Decision Test 4] Placing candidate on hold...")
+    hold_res = place_candidate_on_hold("CAND-DE-3912", reviewer="Admin_Abhinav", notes="Hiring freeze until next quarter")
+    assert hold_res["status"] == "success", f"Place on hold failed: {hold_res}"
+    assert hold_res["workflow_status"] == "ON_HOLD"
+    cand_mv = get_candidate_details("CAND-DE-3912")
+    assert cand_mv["workflow_status"] == "ON_HOLD"
+    print(f"✓ Candidate {cand_mv['name']} transitioned to ON_HOLD.")
+
+    # Test 5: Rejecting a candidate and verifying formal rejection email dispatch
+    print("\n[Decision Test 5] Rejecting candidate and verifying rejection email dispatch...")
+    rej_res = reject_candidate("CAND-DE-3912", reviewer="Admin_Abhinav", notes="Does not meet requirements")
+    assert rej_res["status"] == "success", f"Reject candidate failed: {rej_res}"
+    assert rej_res["workflow_status"] == "REJECTED"
+    assert rej_res["email_dispatch"]["delivery_status"] in ("ACCEPTED_DEV_MOCK", "DELIVERED_SMTP")
+
+    cand_mv = get_candidate_details("CAND-DE-3912")
+    assert cand_mv["workflow_status"] == "REJECTED"
+
+    email_logs = get_all_email_logs()
+    rej_log = next((e for e in email_logs if e["candidate_id"] == "CAND-DE-3912" and e["notification_type"] == "APPLICATION_REJECTION"), None)
+    assert rej_log is not None, "Rejection email record must be persisted in email_notifications."
+    assert "Update regarding your application" in rej_log["subject"]
+    print(f"✓ Candidate {cand_mv['name']} marked REJECTED and rejection email logged to {cand_mv['email']}.")
+
+    # Test 6: Non-Gmail email rejected in approve_for_first_round
+    print("\n[Decision Test 6] Testing non-@gmail.com rejection during First-Round approval...")
+    with get_db_connection() as conn:
+        conn.execute("UPDATE candidates SET email = 'alex.chen.dev99@corporate.org', workflow_status = 'SHORTLISTED' WHERE id = 'CAND-SE-4421';")
+        conn.commit()
+
+    nongmail_app = approve_for_first_round("CAND-SE-4421")
+    assert nongmail_app["status"] == "error"
+    assert "@gmail.com" in nongmail_app["message"]
+
+    # Restore Alex Chen
+    with get_db_connection() as conn:
+        conn.execute("UPDATE candidates SET email = 'alex.chen.dev99@gmail.com' WHERE id = 'CAND-SE-4421';")
+        conn.commit()
+    print("✓ approve_for_first_round correctly refused candidate with non-@gmail.com address.")
+
+    print("\n=================================================================")
+    print("   ALL RECRUITER DECISION & HOLD RESTRICTION TESTS PASSED!       ")
+    print("=================================================================")
+
+
 if __name__ == "__main__":
     run_full_recruitment_workflow_test()
     test_resume_upload_and_profile_matching()
+    test_recruiter_decision_actions_and_hold_restrictions()
 

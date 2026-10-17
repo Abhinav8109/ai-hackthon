@@ -35,6 +35,7 @@ from email_service import (
     get_base_url,
     generate_first_round_invitation_email,
     generate_second_round_selection_email,
+    generate_rejection_email,
     send_email_notification,
     retry_failed_notification
 )
@@ -91,10 +92,12 @@ def approve_for_first_round(candidate_id: str, reviewer: str = "Admin") -> Dict[
             "message": f"Cannot approve candidate in status '{cand['workflow_status']}'. Must be Shortlisted."
         }
 
-    # Validate email
-    email = cand["email"].strip()
+    # Validate email: must be valid format and strictly @gmail.com
+    email = cand["email"].strip().lower()
     if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
         return {"status": "error", "message": f"Invalid candidate email address: {email}"}
+    if not email.endswith("@gmail.com"):
+        return {"status": "error", "message": f"Candidate email '{cand['email']}' is not a @gmail.com address. Only valid @gmail.com addresses are permitted for interview invitations."}
 
     job = get_job_by_id(cand["job_id"])
     if not job:
@@ -429,10 +432,16 @@ def approve_for_second_round(candidate_id: str, reviewer: str = "Admin", notes: 
 
 
 def place_candidate_on_hold(candidate_id: str, reviewer: str = "Admin", notes: str = "") -> Dict[str, Any]:
-    """Step 7: Admin places candidate on hold."""
+    """Step 7: Admin places candidate on hold. Blocked if candidate cleared and approved for Round 2."""
     cand = get_candidate_details(candidate_id)
     if not cand:
         return {"status": "error", "message": f"Candidate {candidate_id} not found."}
+
+    if cand["workflow_status"] == "SECOND_ROUND_APPROVED":
+        return {
+            "status": "error",
+            "message": "Candidate has already cleared Round 1 and been approved for the Second Round. Cannot place on hold."
+        }
 
     now_iso = datetime.now(timezone.utc).isoformat()
     with get_db_connection() as conn:
@@ -444,6 +453,65 @@ def place_candidate_on_hold(candidate_id: str, reviewer: str = "Admin", notes: s
 
     log_audit_event("candidate", candidate_id, "PLACED_ON_HOLD", reviewer, f"Candidate placed on hold. Notes: {notes}")
     return {"status": "success", "candidate_id": candidate_id, "workflow_status": "ON_HOLD"}
+
+
+def mark_candidate_under_review(candidate_id: str, reviewer: str = "Admin", notes: str = "") -> Dict[str, Any]:
+    """Admin marks candidate for further human review."""
+    cand = get_candidate_details(candidate_id)
+    if not cand:
+        return {"status": "error", "message": f"Candidate {candidate_id} not found."}
+
+    if cand["workflow_status"] == "SECOND_ROUND_APPROVED":
+        return {"status": "error", "message": "Candidate has already cleared Round 1 and been approved for the Second Round."}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE candidates SET workflow_status = 'HUMAN_REVIEW_REQUIRED', updated_at = ? WHERE id = ?;",
+            (now_iso, candidate_id)
+        )
+        conn.commit()
+
+    log_audit_event("candidate", candidate_id, "MARKED_UNDER_REVIEW", reviewer, f"Candidate marked for further human review. Notes: {notes}")
+    return {"status": "success", "candidate_id": candidate_id, "workflow_status": "HUMAN_REVIEW_REQUIRED"}
+
+
+def reject_candidate(candidate_id: str, reviewer: str = "Admin", notes: str = "") -> Dict[str, Any]:
+    """Admin rejects candidate and dispatches formal courteous update email to candidate's Gmail."""
+    cand = get_candidate_details(candidate_id)
+    if not cand:
+        return {"status": "error", "message": f"Candidate {candidate_id} not found."}
+
+    if cand["workflow_status"] == "SECOND_ROUND_APPROVED":
+        return {"status": "error", "message": "Candidate has already cleared Round 1 and been approved for the Second Round. Cannot reject."}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE candidates SET workflow_status = 'REJECTED', updated_at = ? WHERE id = ?;",
+            (now_iso, candidate_id)
+        )
+        conn.commit()
+
+    # Dispatch rejection email to candidate's Gmail
+    email_data = generate_rejection_email(
+        candidate_name=cand["name"],
+        job_title=cand["job_title"]
+    )
+
+    dispatch_res = send_email_notification(
+        candidate_id=candidate_id,
+        recipient_email=cand["email"],
+        recipient_name=cand["name"],
+        notification_type="APPLICATION_REJECTION",
+        subject=email_data["subject"],
+        body_text=email_data["body_text"],
+        body_html=email_data["body_html"]
+    )
+
+    log_audit_event("candidate", candidate_id, "REJECTED", reviewer, f"Candidate rejected by {reviewer}. Notes: {notes}")
+    return {"status": "success", "candidate_id": candidate_id, "workflow_status": "REJECTED", "email_dispatch": dispatch_res}
+
 
 
 def retry_candidate_invitation_email(candidate_id: str) -> Dict[str, Any]:
@@ -583,9 +651,21 @@ def match_resume_to_profiles(
     top_job = evaluations[0]
 
     candidate_name = override_name.strip() if override_name and override_name.strip() else structured.candidate_name
-    candidate_email = override_email.strip() if override_email and override_email.strip() else (
-        structured.email or f"{candidate_name.lower().replace(' ', '.')}@applicant.com"
+    raw_email = override_email.strip() if override_email and override_email.strip() else (
+        structured.email or f"{candidate_name.lower().replace(' ', '.')}@gmail.com"
     )
+
+    # Strictly enforce @gmail.com email domain
+    if override_email and not override_email.strip().lower().endswith("@gmail.com"):
+        return {
+            "matched": False,
+            "candidate_name": candidate_name,
+            "candidate_email": override_email,
+            "reason": f"Candidate email '{override_email}' is not a valid @gmail.com address. Only valid @gmail.com email addresses are allowed.",
+            "all_evaluations": []
+        }
+
+    candidate_email = raw_email if raw_email.lower().endswith("@gmail.com") else re.sub(r"@.*$", "@gmail.com", raw_email)
 
     if top_job["match_score"] >= min_threshold:
         # Generate summary

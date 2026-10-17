@@ -166,6 +166,137 @@ Recruitment Team
     return {"subject": subject, "body_text": body_text, "body_html": body_html}
 
 
+def generate_rejection_email(
+    candidate_name: str,
+    job_title: str,
+    support_email: str = "recruitment@nexusai-talent.com"
+) -> Dict[str, str]:
+    """Generates subject, plain text, and HTML body for candidate rejection update."""
+    subject = f"Update regarding your application for {job_title}"
+    body_text = f"""Dear {candidate_name},
+
+Thank you very much for taking the time to participate in our first-round technical screening interview for the {job_title} position.
+
+Our engineering and talent team thoroughly reviewed your interview scorecard, verbatim technical responses, and competency evaluation. While your background and skills are commendable, we have decided to proceed with other candidates whose skill profiles more closely match our immediate requirements for this role.
+
+We truly appreciate the time and effort you invested in interviewing with TalentPilot AI, and we will retain your profile in our talent pool for future opportunities that align with your background.
+
+We wish you all the best in your job search and future professional endeavors.
+
+Best regards,
+Talent Acquisition Team
+"""
+    body_html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #f1f5f9; margin: 0; padding: 24px; }}
+    .container {{ max-width: 580px; margin: 0 auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 32px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
+    .header {{ border-bottom: 2px solid #ef4444; padding-bottom: 16px; margin-bottom: 24px; text-align: center; }}
+    .logo {{ font-size: 22px; font-weight: 800; color: #f87171; letter-spacing: 1px; }}
+    h2 {{ color: #ffffff; font-size: 19px; margin-top: 0; }}
+    p {{ color: #cbd5e1; font-size: 14.5px; line-height: 1.6; margin: 14px 0; }}
+    .notice-box {{ background: rgba(239, 68, 68, 0.08); border-left: 3px solid #ef4444; border-radius: 6px; padding: 16px 20px; margin: 20px 0; font-size: 14px; color: #fca5a5; }}
+    .footer {{ border-top: 1px solid #1f2937; margin-top: 30px; padding-top: 18px; font-size: 12px; color: #64748b; text-align: center; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">TALENTPILOT AI</div>
+      <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; margin-top: 4px;">Application Status Update</div>
+    </div>
+    <h2>Dear {candidate_name},</h2>
+    <div class="notice-box">
+      Thank you for participating in our first-round technical screening interview for the <strong>{job_title}</strong> position.
+    </div>
+    <p>Our engineering and recruitment team carefully reviewed your interview evaluation. While your experience is notable, we have decided to advance with other candidates whose profiles more closely align with our immediate requirements for this role.</p>
+    <p>We will retain your resume in our talent network for future roles that match your expertise. We sincerely appreciate your interest and wish you the best in your professional endeavors.</p>
+    <p>Best regards,<br><strong>Talent Acquisition Team</strong></p>
+    <div class="footer">
+      Support: {support_email}<br>
+      © TalentPilot AI Recruitment Platform. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>"""
+    return {"subject": subject, "body_text": body_text, "body_html": body_html}
+
+
+def get_smtp_credentials() -> Dict[str, Optional[Any]]:
+    """Loads Gmail SMTP credentials from SQLite app_settings or environment variables."""
+    from database import get_app_setting
+    user = get_app_setting("GMAIL_USER") or os.getenv("GMAIL_USER") or os.getenv("SMTP_USER")
+    password = get_app_setting("GMAIL_APP_PASSWORD") or os.getenv("GMAIL_APP_PASSWORD") or os.getenv("SMTP_PASSWORD")
+    host = get_app_setting("SMTP_HOST") or os.getenv("SMTP_HOST", "smtp.gmail.com")
+    port_str = get_app_setting("SMTP_PORT") or os.getenv("SMTP_PORT", "587")
+    try:
+        port = int(port_str)
+    except Exception:
+        port = 587
+    return {
+        "user": user.strip() if user else None,
+        "password": password.strip() if password else None,
+        "host": host,
+        "port": port
+    }
+
+
+def save_smtp_credentials(gmail_user: str, gmail_app_password: str) -> None:
+    """Saves Gmail SMTP credentials persistently to SQLite and runtime environment."""
+    from database import set_app_setting
+    clean_user = gmail_user.strip()
+    clean_pass = gmail_app_password.strip().replace(" ", "")  # strip whitespace from 16-character code
+    set_app_setting("GMAIL_USER", clean_user)
+    set_app_setting("GMAIL_APP_PASSWORD", clean_pass)
+    set_app_setting("SMTP_HOST", "smtp.gmail.com")
+    set_app_setting("SMTP_PORT", "587")
+
+    os.environ["GMAIL_USER"] = clean_user
+    os.environ["SMTP_USER"] = clean_user
+    os.environ["GMAIL_APP_PASSWORD"] = clean_pass
+    os.environ["SMTP_PASSWORD"] = clean_pass
+    os.environ["SMTP_HOST"] = "smtp.gmail.com"
+    os.environ["SMTP_PORT"] = "587"
+
+
+def test_smtp_connection(recipient_email: str) -> Dict[str, Any]:
+    """Tests Gmail SMTP connection and sends a live verification test email."""
+    creds = get_smtp_credentials()
+    if not creds["user"] or not creds["password"]:
+        return {
+            "success": False,
+            "error": "Gmail credentials are not configured. Please enter your Gmail address and 16-character App Password."
+        }
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "TalentPilot AI — Live SMTP Verification Successful"
+        msg["From"] = f"TalentPilot Recruitment <{creds['user']}>"
+        msg["To"] = recipient_email
+        msg["Date"] = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000")
+
+        text = f"Congratulations! Your Gmail SMTP connection ({creds['user']}) is successfully authenticated and delivering real emails."
+        html = f"""<div style="font-family:sans-serif; background:#0b0f19; color:#f8fafc; padding:24px; border-radius:8px;">
+            <h2 style="color:#10b981;">✓ Live Gmail SMTP Verified!</h2>
+            <p>Your Gmail account (<strong>{creds['user']}</strong>) is properly connected via Google App Passwords.</p>
+            <p style="color:#94a3b8; font-size:13px;">TalentPilot AI will now deliver real emails to candidate @gmail.com addresses automatically at each interview stage.</p>
+        </div>"""
+        msg.attach(MIMEText(text, "plain"))
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP(creds["host"], creds["port"], timeout=12.0) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(creds["user"], creds["password"])
+            server.sendmail(creds["user"], [recipient_email], msg.as_string())
+
+        return {"success": True, "message": f"Verified! Live test email dispatched to {recipient_email}."}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def send_email_notification(
     candidate_id: str,
     recipient_email: str,
@@ -179,7 +310,7 @@ def send_email_notification(
     """
     Core notification dispatcher.
     Checks for duplicate sends unless force_retry is True.
-    Attempts real SMTP if configured; otherwise logs verifiable ACCEPTED_DEV_MOCK status.
+    Attempts real SMTP via Gmail credentials if configured; otherwise accurately marks ACCEPTED_DEV_MOCK.
     Persists exact delivery audit record in database.
     """
     now = datetime.now(timezone.utc).isoformat()
@@ -200,12 +331,13 @@ def send_email_notification(
                     "message": "Notification already successfully sent to candidate."
                 }
 
-    # 2. Inspect SMTP Configuration
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", 587))
-    smtp_user = os.getenv("SMTP_USER") or os.getenv("GMAIL_USER")
-    smtp_pass = os.getenv("SMTP_PASSWORD") or os.getenv("GMAIL_APP_PASSWORD")
-    smtp_from = os.getenv("SMTP_FROM", smtp_user or "recruitment@nexusai-talent.com")
+    # 2. Inspect SMTP Configuration (Gmail SMTP)
+    creds = get_smtp_credentials()
+    smtp_host = creds["host"]
+    smtp_port = creds["port"]
+    smtp_user = creds["user"]
+    smtp_pass = creds["password"]
+    smtp_from = smtp_user or "recruitment@nexusai-talent.com"
 
     delivery_status = "QUEUED"
     provider_ref = None
@@ -223,21 +355,21 @@ def send_email_notification(
             msg.attach(MIMEText(body_text, "plain"))
             msg.attach(MIMEText(body_html, "html"))
 
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=10.0) as server:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=12.0) as server:
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
                 server.login(smtp_user, smtp_pass)
-                res = server.sendmail(smtp_from, [recipient_email], msg.as_string())
+                server.sendmail(smtp_from, [recipient_email], msg.as_string())
                 delivery_status = "DELIVERED_SMTP"
-                provider_ref = f"SMTP 250 OK via {smtp_host}"
+                provider_ref = f"Gmail SMTP 250 OK via {smtp_host}"
         except Exception as e:
             delivery_status = "FAILED"
             error_details = str(e)
     else:
         # Development / Offline Mock Provider
         delivery_status = "ACCEPTED_DEV_MOCK"
-        provider_ref = "DevMockProvider: Credentials unconfigured in .env. Logged in database."
+        provider_ref = "DevMockProvider: Gmail SMTP unconfigured. Logged in database."
 
     # 3. Persist Notification in SQLite
     with get_db_connection() as conn:

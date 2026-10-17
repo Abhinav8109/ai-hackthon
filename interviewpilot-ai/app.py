@@ -43,10 +43,18 @@ from pipeline_manager import (
     complete_candidate_interview,
     approve_for_second_round,
     place_candidate_on_hold,
+    mark_candidate_under_review,
+    reject_candidate,
     retry_candidate_invitation_email,
     match_resume_to_profiles
 )
-from email_service import get_base_url, retry_failed_notification
+from email_service import (
+    get_base_url,
+    retry_failed_notification,
+    get_smtp_credentials,
+    save_smtp_credentials,
+    test_smtp_connection
+)
 from agent import InterviewPilotAgent
 from tools import get_activity_logs, clear_activity_logs
 from report_generator import create_competency_radar_chart, create_competency_bar_chart, generate_markdown_report
@@ -249,8 +257,67 @@ with st.sidebar:
     # Sidebar context information
     if st.session_state.active_portal == "Admin Portal":
         st.markdown("#### 👤 Admin Role: Recruitment Manager")
-        st.caption("Authorized to review candidates, approve first-round invitations, review scorecards, and approve second rounds.")
+        st.caption("Authorized to review candidates, approve first-round invitations, review scorecards, and make hiring decisions.")
         st.info("🔒 Note: Manual 'Launch Interview' actions have been removed. Candidates conduct interviews independently via secure invitation links.")
+
+        st.markdown("---")
+        st.markdown("#### 📧 Real Gmail SMTP Dispatch")
+        st.caption("Configure your Gmail address & Google App Password to dispatch live emails for invitations, second rounds, and rejections.")
+
+        creds = get_smtp_credentials()
+        is_live = bool(creds["user"] and creds["password"])
+        if is_live:
+            st.markdown(f'<span class="status-pill pill-emerald">🟢 Live Gmail Active: {creds["user"]}</span>', unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="status-pill pill-amber">🟡 Fallback: ACCEPTED_DEV_MOCK</span>', unsafe_allow_html=True)
+
+        with st.expander("⚙️ Configure Live Gmail Dispatch", expanded=not is_live):
+            gmail_user_input = st.text_input(
+                "Gmail Address",
+                value=creds["user"] or "",
+                placeholder="your.account@gmail.com",
+                key="admin_gmail_user"
+            )
+            gmail_pass_input = st.text_input(
+                "16-Character App Password",
+                value=creds["password"] or "",
+                type="password",
+                placeholder="abcd efgh ijkl mnop",
+                help="Requires 2-Step Verification enabled in Google Account > Security > App passwords. Enter the 16-character code.",
+                key="admin_gmail_pass"
+            )
+
+            if st.button("💾 Save Gmail Credentials", key="btn_save_gmail", use_container_width=True):
+                if not gmail_user_input.strip():
+                    st.warning("Please provide a Gmail address.")
+                elif not gmail_user_input.strip().lower().endswith("@gmail.com"):
+                    st.error("Email must be a valid @gmail.com address.")
+                elif not gmail_pass_input.strip():
+                    st.warning("Please enter your 16-character Google App Password.")
+                else:
+                    save_smtp_credentials(gmail_user_input, gmail_pass_input)
+                    st.session_state.toast_msg = "Gmail SMTP credentials saved successfully!"
+                    st.rerun()
+
+            st.markdown("<hr style='border-color: rgba(255,255,255,0.06); margin: 8px 0;'>", unsafe_allow_html=True)
+            test_recipient = st.text_input(
+                "Recipient for Live Test",
+                value=gmail_user_input or "sukrit.ss.31@gmail.com",
+                placeholder="recipient@gmail.com",
+                key="admin_test_recipient"
+            )
+            if st.button("📨 Send Live Test Email", key="btn_test_gmail", use_container_width=True):
+                if not test_recipient.strip():
+                    st.warning("Please enter a test recipient email.")
+                elif not test_recipient.strip().lower().endswith("@gmail.com"):
+                    st.error("Recipient must be a valid @gmail.com address.")
+                else:
+                    with st.spinner("Connecting to smtp.gmail.com:587 (TLS)..."):
+                        test_res = test_smtp_connection(test_recipient.strip())
+                        if test_res["success"]:
+                            st.success(f"✓ {test_res['message']}")
+                        else:
+                            st.error(f"SMTP Connection Failed: {test_res['error']}")
     else:
         st.markdown("#### 🎓 Candidate Screening Gateway")
         st.caption("Candidate-facing interface. Access is isolated and validated via unique cryptographic invitation tokens.")
@@ -702,21 +769,21 @@ elif st.session_state.active_portal == "Admin Portal":
             if st.button("⚡ Load DevOps Lead Sample (Matches DevOps)", use_container_width=True):
                 st.session_state.upload_text_val = SAMPLE_DEVOPS_RESUME
                 st.session_state.upload_name_val = "David Ross"
-                st.session_state.upload_email_val = "david.ross.devops@example.com"
+                st.session_state.upload_email_val = "david.ross.devops@gmail.com"
                 st.session_state.upload_match_result = None
                 st.rerun()
         with qf_c2:
             if st.button("⚡ Load AI Engineer Sample (Matches AI Systems)", use_container_width=True):
                 st.session_state.upload_text_val = SAMPLE_AI_RESUME
                 st.session_state.upload_name_val = "Anita Roy"
-                st.session_state.upload_email_val = "anita.roy.ai@example.com"
+                st.session_state.upload_email_val = "anita.roy.ai@gmail.com"
                 st.session_state.upload_match_result = None
                 st.rerun()
         with qf_c3:
             if st.button("⚡ Load Non-Matching Sample (Chef Marco)", use_container_width=True):
                 st.session_state.upload_text_val = SAMPLE_NONMATCHING_CHEF_RESUME
                 st.session_state.upload_name_val = "Chef Marco Pierre"
-                st.session_state.upload_email_val = "marco.pierre@culinaryart.com"
+                st.session_state.upload_email_val = "marco.pierre.chef@gmail.com"
                 st.session_state.upload_match_result = None
                 st.rerun()
 
@@ -744,19 +811,21 @@ elif st.session_state.active_portal == "Admin Portal":
         with up_col2:
             st.markdown("""
             <div class="saas-card" style="height:100%;">
-                <h4 style="color:#FFFFFF; margin-top:0;">📋 Candidate Identity (Optional Override)</h4>
+                <h4 style="color:#FFFFFF; margin-top:0;">📋 Candidate Identity (Strictly @gmail.com)</h4>
                 <p style="color:#94A3B8; font-size:0.85rem;">
-                    If omitted, the agent automatically detects candidate name and email from the resume.
+                    Candidate emails must strictly be <strong>@gmail.com</strong> for real Gmail delivery. If omitted, the agent extracts and formats from resume.
                 </p>
             </div>
             """, unsafe_allow_html=True)
             cand_name_ov = st.text_input("Candidate Name", value=st.session_state.get("upload_name_val", ""), placeholder="e.g. David Ross")
-            cand_email_ov = st.text_input("Candidate Email (for Interview Invitation)", value=st.session_state.get("upload_email_val", ""), placeholder="e.g. david.ross@example.com")
+            cand_email_ov = st.text_input("Candidate Email (Must be @gmail.com)", value=st.session_state.get("upload_email_val", ""), placeholder="e.g. david.ross@gmail.com")
 
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🤖 Analyze & Auto-Match Resume to Open Roles", type="primary", use_container_width=True):
             if not resume_text_input.strip():
                 st.warning("Please upload a PDF or enter resume text to analyze.")
+            elif cand_email_ov.strip() and not cand_email_ov.strip().lower().endswith("@gmail.com"):
+                st.error("❌ Candidate email must end with @gmail.com (e.g. candidate@gmail.com). Non-Gmail domains are not permitted.")
             else:
                 with st.spinner("AI Agent analyzing skills, taxonomy keywords, and job alignment across all 5 open roles..."):
                     match_res = match_resume_to_profiles(
@@ -897,7 +966,7 @@ elif st.session_state.active_portal == "Admin Portal":
             sel_job = st.selectbox("Filter by Role:", job_choices, format_func=lambda x: job_labels.get(x, x))
             st.session_state.admin_filter_job = sel_job
         with f_c3:
-            status_choices = ["ALL", "SHORTLISTED", "FIRST_ROUND_APPROVED", "INVITED", "IN_PROGRESS", "COMPLETED", "SECOND_ROUND_APPROVED", "ON_HOLD", "INVITATION_FAILED"]
+            status_choices = ["ALL", "SHORTLISTED", "FIRST_ROUND_APPROVED", "INVITED", "IN_PROGRESS", "COMPLETED", "HUMAN_REVIEW_REQUIRED", "SECOND_ROUND_APPROVED", "ON_HOLD", "REJECTED", "INVITATION_FAILED"]
             sel_status = st.selectbox("Filter by Status:", status_choices)
             st.session_state.admin_filter_status = sel_status
 
@@ -920,7 +989,9 @@ elif st.session_state.active_portal == "Admin Portal":
                 st_class = "pill-amber"
             elif c["workflow_status"] in ("COMPLETED", "SECOND_ROUND_APPROVED"):
                 st_class = "pill-emerald"
-            elif c["workflow_status"] == "INVITATION_FAILED":
+            elif c["workflow_status"] in ("HUMAN_REVIEW_REQUIRED", "ON_HOLD"):
+                st_class = "pill-amber"
+            elif c["workflow_status"] in ("REJECTED", "INVITATION_FAILED"):
                 st_class = "pill-red"
 
             skills_html = "".join([f'<span class="skill-tag">{s}</span>' for s in c["skills"][:6]])
@@ -1006,10 +1077,13 @@ elif st.session_state.active_portal == "Admin Portal":
                         st.success(f"🎯 Interview Completed! Rating: {c.get('overall_score', 'N/A')}/5.0 — Review scorecard in Tab 4.")
 
                     elif c["workflow_status"] == "SECOND_ROUND_APPROVED":
-                        st.markdown('<span class="status-pill pill-emerald">Approved for Second Round</span>', unsafe_allow_html=True)
+                        st.markdown('<span class="status-pill pill-emerald">🎉 Approved for Second Round</span>', unsafe_allow_html=True)
 
                     elif c["workflow_status"] == "ON_HOLD":
-                        st.markdown('<span class="status-pill pill-amber">Placed on Hold</span>', unsafe_allow_html=True)
+                        st.markdown('<span class="status-pill pill-amber">⏸️ Placed on Hold</span>', unsafe_allow_html=True)
+
+                    elif c["workflow_status"] == "REJECTED":
+                        st.markdown('<span class="status-pill pill-red">❌ Application Rejected</span>', unsafe_allow_html=True)
 
                 with btn_col2:
                     st.download_button(
@@ -1038,46 +1112,49 @@ elif st.session_state.active_portal == "Admin Portal":
                 st.markdown("<hr style='border-color: rgba(255,255,255,0.06); margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------------
-    # TAB 2: INTERVIEW PIPELINE KANBAN
+    # TAB 3: INTERVIEW PIPELINE KANBAN
     # ------------------------------------------------------------------------
     with tab_pipeline:
         st.markdown("### 📊 Recruitment Workflow Pipeline")
-        p_c1, p_c2, p_c3, p_c4, p_c5 = st.columns(5)
+        p_c1, p_c2, p_c3, p_c4, p_c5, p_c6 = st.columns(6)
 
         stages = [
-            ("1. Shortlisted", "SHORTLISTED", p_c1),
-            ("2. Invited", "INVITED", p_c2),
-            ("3. In Progress", "IN_PROGRESS", p_c3),
-            ("4. Completed", "COMPLETED", p_c4),
-            ("5. Round 2 Approved", "SECOND_ROUND_APPROVED", p_c5)
+            ("1. Shortlisted", ["SHORTLISTED"], p_c1),
+            ("2. Invited", ["INVITED", "FIRST_ROUND_APPROVED"], p_c2),
+            ("3. In Progress", ["IN_PROGRESS"], p_c3),
+            ("4. Completed", ["COMPLETED", "HUMAN_REVIEW_REQUIRED"], p_c4),
+            ("5. Round 2 Approved", ["SECOND_ROUND_APPROVED"], p_c5),
+            ("6. Hold / Rejected", ["ON_HOLD", "REJECTED"], p_c6)
         ]
 
         all_candidates = get_candidates_list()
 
-        for title, status_code, col in stages:
+        for title, status_list, col in stages:
             with col:
                 st.markdown(f"#### {title}")
-                stage_cands = [c for c in all_candidates if c["workflow_status"] == status_code or (status_code == "COMPLETED" and c["workflow_status"] == "HUMAN_REVIEW_REQUIRED")]
+                stage_cands = [c for c in all_candidates if c["workflow_status"] in status_list]
                 st.caption(f"{len(stage_cands)} candidate(s)")
 
                 for sc in stage_cands:
+                    border_color = "#10B981" if sc["workflow_status"] == "SECOND_ROUND_APPROVED" else ("#EF4444" if sc["workflow_status"] == "REJECTED" else "#1F2937")
                     st.markdown(f"""
-                    <div style="background: #111827; border: 1px solid #1F2937; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+                    <div style="background: #111827; border: 1px solid {border_color}; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
                         <strong style="color: #FFFFFF;">{sc['name']}</strong><br>
                         <small style="color: #94A3B8;">{sc['job_title']}</small><br>
                         <span style="color:#38BDF8; font-size:0.75rem; font-weight:bold;">Match: {sc['match_score']}%</span>
+                        <div style="font-size:0.72rem; color:#94A3B8; margin-top:4px;">Status: <code>{sc['workflow_status']}</code></div>
                     </div>
                     """, unsafe_allow_html=True)
 
     # ------------------------------------------------------------------------
-    # TAB 3: COMPLETED INTERVIEW SCORECARDS & AUDIT (STEP 7 & STEP 8)
+    # TAB 4: COMPLETED INTERVIEW SCORECARDS & AUDIT (STEP 7 & STEP 8)
     # ------------------------------------------------------------------------
     with tab_scorecards:
         st.markdown("### Step 7 & 8: Review Completed Interviews & Authorize Second Round")
-        st.markdown("Inspect objective, evidence-grounded AI evaluations. **No automated rejections:** Human recruiters make the definitive decision to **Approve for Second Round** or **Place on Hold**.")
+        st.markdown("Inspect objective, evidence-grounded AI evaluations. Recruiter decisions include **Approve for Second Round**, **Put Under Review**, **On Hold**, and **Reject**.")
 
         # Find all candidates with completed scorecards
-        completed_cands = [c for c in get_candidates_list() if c.get("overall_score") is not None or c["workflow_status"] in ("COMPLETED", "HUMAN_REVIEW_REQUIRED", "SECOND_ROUND_APPROVED", "ON_HOLD")]
+        completed_cands = [c for c in get_candidates_list() if c.get("overall_score") is not None or c["workflow_status"] in ("COMPLETED", "HUMAN_REVIEW_REQUIRED", "SECOND_ROUND_APPROVED", "ON_HOLD", "REJECTED")]
 
         if not completed_cands:
             st.info("No completed interviews yet. To test, open an active candidate link or use the Candidate Interview Portal.")
@@ -1180,28 +1257,95 @@ elif st.session_state.active_portal == "Admin Portal":
 
                     st.markdown("---")
 
-                    # Step 8 Actions: Approve for Second Round or Place on Hold
+                    # Step 8 Actions: Recruiter Decision & Advancement
                     st.markdown("#### ⚖️ Human Recruiter Decision & Advancement")
-                    d_col1, d_col2 = st.columns(2)
+                    cand_status = cand["workflow_status"]
 
-                    with d_col1:
-                        if cand["workflow_status"] != "SECOND_ROUND_APPROVED":
-                            if st.button(f"🎉 Approve for Second Round ({cand['name']})", key=f"round2_{cand['id']}", type="primary", use_container_width=True):
-                                with st.spinner("Authorizing second round and dispatching notification email..."):
+                    if cand_status == "SECOND_ROUND_APPROVED":
+                        st.markdown(f"""
+                        <div style="background: rgba(16, 185, 129, 0.12); border: 2px solid #10B981; border-radius: 10px; padding: 18px; margin: 12px 0;">
+                            <div style="display: flex; align-items: center; gap: 14px;">
+                                <span style="font-size: 2.2rem;">🎉</span>
+                                <div>
+                                    <h3 style="color: #10B981; margin: 0 0 4px 0;">Cleared Round 1 — Approved for Second Round!</h3>
+                                    <p style="color: #E2E8F0; margin: 0; font-size: 0.95rem;">
+                                        Candidate has cleared first-round technical screening. Official Round 2 selection email has been dispatched to <strong>{cand['email']}</strong>.
+                                    </p>
+                                    <p style="color: #94A3B8; margin: 6px 0 0 0; font-size: 0.85rem;">
+                                        🔒 <em>Candidate has cleared the first round; 'On Hold' and 'Reject' options are permanently disabled.</em>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    elif cand_status == "REJECTED":
+                        st.markdown(f"""
+                        <div style="background: rgba(239, 68, 68, 0.12); border: 2px solid #EF4444; border-radius: 10px; padding: 18px; margin: 12px 0;">
+                            <div style="display: flex; align-items: center; gap: 14px;">
+                                <span style="font-size: 2.2rem;">❌</span>
+                                <div>
+                                    <h3 style="color: #F87171; margin: 0 0 4px 0;">Application Rejected</h3>
+                                    <p style="color: #E2E8F0; margin: 0; font-size: 0.95rem;">
+                                        Candidate status is marked as Rejected. A formal, courteous update email was dispatched to <strong>{cand['email']}</strong>.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    else:
+                        if cand_status == "HUMAN_REVIEW_REQUIRED":
+                            st.info("⚠️ This candidate is currently marked as **Under Human Review** pending recruiter review.")
+                        elif cand_status == "ON_HOLD":
+                            st.warning("⏸️ This candidate is currently **On Hold** in the recruitment pipeline.")
+
+                        st.markdown("<p style='color:#94A3B8; font-size:0.9rem;'>Select recruiter advancement action for this candidate:</p>", unsafe_allow_html=True)
+
+                        c_act1, c_act2, c_act3, c_act4 = st.columns(4)
+
+                        with c_act1:
+                            if st.button(f"🎉 Approve Round 2", key=f"round2_{cand['id']}", type="primary", use_container_width=True):
+                                with st.spinner("Authorizing Round 2 & dispatching selection email..."):
                                     r2_res = approve_for_second_round(cand["id"], reviewer="Admin")
-                                    st.session_state.toast_msg = f"Approved {cand['name']} for Second Round! Selection email dispatched to {cand['email']}."
-                                    st.rerun()
-                        else:
-                            st.success("✅ Candidate Approved for Second Round. Notification email has been dispatched.")
+                                    if r2_res.get("status") in ("success", "info"):
+                                        st.session_state.toast_msg = f"Approved {cand['name']} for Second Round! Selection email dispatched to {cand['email']}."
+                                        st.rerun()
+                                    else:
+                                        st.error(r2_res.get("message", "Error approving candidate."))
 
-                    with d_col2:
-                        if cand["workflow_status"] != "ON_HOLD":
-                            if st.button(f"⏸️ Place on Hold ({cand['name']})", key=f"hold_{cand['id']}", use_container_width=True):
-                                place_candidate_on_hold(cand["id"], reviewer="Admin")
-                                st.session_state.toast_msg = f"Candidate {cand['name']} placed on hold."
-                                st.rerun()
-                        else:
-                            st.warning("Candidate is currently on hold.")
+                        with c_act2:
+                            if st.button(f"⚠️ Put Under Review", key=f"rev_{cand['id']}", use_container_width=True):
+                                with st.spinner("Marking candidate under review..."):
+                                    rev_res = mark_candidate_under_review(cand["id"], reviewer="Admin", notes="Recruiter requested additional human review.")
+                                    if rev_res.get("status") == "success":
+                                        st.session_state.toast_msg = f"{cand['name']} marked as Under Human Review."
+                                        st.rerun()
+                                    else:
+                                        st.error(rev_res.get("message", "Error updating status."))
+
+                        with c_act3:
+                            if cand_status == "ON_HOLD":
+                                st.button("⏸️ Already On Hold", key=f"held_{cand['id']}", disabled=True, use_container_width=True)
+                            else:
+                                if st.button(f"⏸️ Place on Hold", key=f"hold_{cand['id']}", use_container_width=True):
+                                    with st.spinner("Placing candidate on hold..."):
+                                        h_res = place_candidate_on_hold(cand["id"], reviewer="Admin", notes="Recruiter placed candidate on hold.")
+                                        if h_res.get("status") == "success":
+                                            st.session_state.toast_msg = f"Candidate {cand['name']} placed on hold."
+                                            st.rerun()
+                                        else:
+                                            st.error(h_res.get("message", "Error placing candidate on hold."))
+
+                        with c_act4:
+                            if st.button(f"❌ Reject Candidate", key=f"rej_{cand['id']}", use_container_width=True):
+                                with st.spinner("Rejecting candidate & dispatching courteous email..."):
+                                    rej_res = reject_candidate(cand["id"], reviewer="Admin", notes="Rejected based on interview evaluation.")
+                                    if rej_res.get("status") == "success":
+                                        st.session_state.toast_msg = f"Candidate {cand['name']} rejected. Courteous notification dispatched to {cand['email']}."
+                                        st.rerun()
+                                    else:
+                                        st.error(rej_res.get("message", "Error rejecting candidate."))
 
     # ------------------------------------------------------------------------
     # TAB 4: EMAIL DELIVERY & ACTIVITY LOG (STEP 3 & STEP 8 TRACKING)

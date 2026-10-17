@@ -84,7 +84,7 @@ SAMPLE_RESPONSES = {
 
 # Pre-crafted sample resumes for instant live demonstration of matching & non-matching
 SAMPLE_DEVOPS_RESUME = """David Ross
-Email: david.ross.devops@example.com | Phone: (555) 345-9876
+Email: david.ross.devops@gmail.com | Phone: (555) 345-9876
 Location: Austin, TX | LinkedIn: linkedin.com/in/david-ross-sre
 
 PROFESSIONAL SUMMARY
@@ -99,7 +99,7 @@ Kubernetes, AWS, Terraform, Docker, CI/CD, Prometheus, Helm, Python, Linux, Bash
 
 
 SAMPLE_AI_RESUME = """Anita Roy
-Email: anita.roy.ai@example.com | Phone: (555) 789-2341
+Email: anita.roy.ai@gmail.com | Phone: (555) 789-2341
 Location: Seattle, WA | LinkedIn: linkedin.com/in/anita-roy-ai
 
 PROFESSIONAL SUMMARY
@@ -113,7 +113,7 @@ PyTorch, LangChain, RAG, Vector DB, ChromaDB, Python, FastAPI, Docker, PostgreSQ
 
 
 SAMPLE_NONMATCHING_CHEF_RESUME = """Chef Marco Pierre
-Email: marco.pierre@culinaryart.com | Phone: (555) 901-4567
+Email: marco.pierre.chef@gmail.com | Phone: (555) 901-4567
 Location: Chicago, IL
 
 PROFESSIONAL SUMMARY
