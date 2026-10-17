@@ -1,724 +1,993 @@
 """
-InterviewPilot AI — Complete Talent Acquisition & Agentic Screening System
-Features:
+TalentPilot AI — Production-Grade AI Recruitment Platform
+Full End-to-End Workflow:
 1. Admin Portal:
-   - Sourced & shortlisted candidate profiles organized by Role Buckets (Software Engineer, DevOps, AI/ML, etc.)
+   - Sourced & shortlisted candidate profiles organized by Role
    - Match score analysis & claim summaries
-   - Admin Approval workflow with automated Gmail dispatching to candidate email (e.g. sukrit.ss.31@gmail.com)
-   - Live Email Dispatch Terminal with full rendered HTML previews & credentials
-   - Completed Interview Audit & Scorecards review
-   - Sourcing Agent for uploading and auto-classifying new resumes
-2. Candidate Interview Gateway:
-   - Protected login requiring Candidate Access ID and Passcode (received via Gmail invitation)
-   - 1-click Quick-Fill for instant demonstration
-   - Personalized first-round screening interview with resume-aware questions
-   - Real-time adaptive follow-ups, observable tool execution, Plotly visualizations, and scorecard export.
+   - "Approve for First-Round Interview" triggers automatic plan generation, token creation & email invitation
+   - Zero "Launch Interview" options in admin views
+   - Completed Interview Review with evidence scorecards & radar charts
+   - Human-in-the-loop decisions: "Approve for Second Round" (auto-triggers email) & "Place on Hold"
+   - Email Activity audit log with retry mechanism
+2. Candidate Interview Portal:
+   - Token-validated separate candidate interface (via URL ?token=... or direct token entry)
+   - Welcome & instructions screen with explicit "Start Interview" trigger
+   - 8-10 question resume-anchored adaptive interview with follow-up probing
+   - Turn-by-turn persistence in SQLite
+   - Completion submission screen
 """
 
 import streamlit as st
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
-from resume_parser import parse_resume, extract_text_from_pdf, StructuredResume
-from tools import get_activity_logs, clear_activity_logs
-from agent import InterviewPilotAgent, TARGET_COMPETENCIES
-from report_generator import (
-    compute_overall_score,
-    create_competency_radar_chart,
-    create_competency_bar_chart,
-    generate_candidate_feedback_letter,
-    generate_markdown_report
+from database import (
+    init_db,
+    seed_database_if_empty,
+    get_all_jobs,
+    get_job_by_id,
+    get_candidates_list,
+    get_candidate_details,
+    get_scorecard_by_candidate_id,
+    get_qa_turns_by_session_id,
+    get_all_email_logs,
+    get_audit_events
 )
-from demo_data import SYNTHETIC_RESUME_TEXT, SYNTHETIC_JD_TEXT, SAMPLE_RESPONSES
 from pipeline_manager import (
-    get_all_roles,
-    get_role_definition,
-    get_candidates,
-    get_candidate_by_id,
-    approve_candidate,
-    authenticate_candidate,
-    record_interview_completion,
-    shortlist_uploaded_resume,
-    CandidateProfile
+    get_pipeline_overview_metrics,
+    approve_for_first_round,
+    validate_candidate_interview_token,
+    start_candidate_interview,
+    record_turn_answer,
+    complete_candidate_interview,
+    approve_for_second_round,
+    place_candidate_on_hold,
+    retry_candidate_invitation_email
 )
-from notification_service import get_dispatch_logs, send_interview_invitation
+from email_service import get_base_url, retry_failed_notification
+from agent import InterviewPilotAgent
+from tools import get_activity_logs, clear_activity_logs
+from report_generator import create_competency_radar_chart, create_competency_bar_chart, generate_markdown_report
+from resume_parser import parse_resume
+from demo_data import SAMPLE_RESPONSES
 
+
+# Ensure database tables exist and are seeded
+seed_database_if_empty()
 
 # Page Configuration
 st.set_page_config(
-    page_title="TalentPilot AI — Agentic Screening & Hiring System",
-    page_icon="🤖",
+    page_title="TalentPilot AI — Enterprise Screening Platform",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom High-End Dark Navy SaaS Styling
+# High-End Slate / Navy Enterprise SaaS Design System
 CUSTOM_CSS = """
 <style>
-    /* Dark Navy Background & Global Palette */
+    /* Dark Slate / Navy Palette */
     .stApp {
-        background-color: #070B14;
+        background-color: #0B0F19;
         color: #F8FAFC;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
-    /* Sidebar Styling */
+    /* Sidebar Navigation */
     section[data-testid="stSidebar"] {
-        background-color: #0D1527;
+        background-color: #0F172A;
         border-right: 1px solid rgba(255, 255, 255, 0.08);
     }
 
-    /* Glassmorphic Cards */
-    .glass-card {
-        background: rgba(17, 24, 39, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+    /* Enterprise Cards */
+    .saas-card {
+        background: #111827;
+        border: 1px solid #1F2937;
         border-radius: 12px;
         padding: 20px 24px;
         margin-bottom: 16px;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
     }
 
-    .candidate-card {
-        background: linear-gradient(135deg, rgba(17, 24, 39, 0.85) 0%, rgba(20, 27, 45, 0.95) 100%);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 14px;
-        padding: 22px;
-        margin-bottom: 16px;
-        transition: transform 0.2s ease, border-color 0.2s ease;
-    }
-    .candidate-card:hover {
-        border-color: rgba(0, 240, 255, 0.4);
-    }
-
-    .question-card {
-        background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%);
-        border: 1px solid rgba(0, 240, 255, 0.3);
-        border-radius: 14px;
-        padding: 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 0 25px rgba(0, 240, 255, 0.08);
-    }
-
-    .followup-card {
-        background: linear-gradient(135deg, rgba(46, 16, 101, 0.4) 0%, rgba(30, 27, 75, 0.6) 100%);
-        border: 1px solid rgba(168, 85, 247, 0.4);
-        border-radius: 14px;
+    .candidate-row-card {
+        background: #111827;
+        border: 1px solid #1F2937;
+        border-radius: 12px;
         padding: 20px;
-        margin-top: 15px;
-        margin-bottom: 20px;
+        margin-bottom: 14px;
+        transition: border-color 0.2s ease;
+    }
+    .candidate-row-card:hover {
+        border-color: #3B82F6;
     }
 
-    /* Badge Pills */
-    .badge-pill {
+    .question-panel {
+        background: linear-gradient(135deg, #111827 0%, #1E293B 100%);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-radius: 14px;
+        padding: 26px;
+        margin-bottom: 20px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    .followup-panel {
+        background: rgba(88, 28, 135, 0.25);
+        border: 1px solid #8B5CF6;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 16px 0;
+    }
+
+    /* Status Pills */
+    .status-pill {
         display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        font-size: 0.72rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 1px;
+        letter-spacing: 0.5px;
     }
-    .badge-cyan {
-        background: rgba(0, 240, 255, 0.15);
-        color: #00F0FF;
-        border: 1px solid rgba(0, 240, 255, 0.3);
-    }
-    .badge-purple {
-        background: rgba(168, 85, 247, 0.15);
-        color: #C084FC;
-        border: 1px solid rgba(168, 85, 247, 0.3);
-    }
-    .badge-amber {
-        background: rgba(245, 158, 11, 0.15);
-        color: #FCD34D;
-        border: 1px solid rgba(245, 158, 11, 0.3);
-    }
-    .badge-green {
-        background: rgba(16, 185, 129, 0.15);
-        color: #34D399;
-        border: 1px solid rgba(16, 185, 129, 0.3);
-    }
+    .pill-blue { background: rgba(59, 130, 246, 0.15); color: #60A5FA; border: 1px solid rgba(59, 130, 246, 0.3); }
+    .pill-emerald { background: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .pill-amber { background: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .pill-red { background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .pill-purple { background: rgba(168, 85, 247, 0.15); color: #C084FC; border: 1px solid rgba(168, 85, 247, 0.3); }
 
-    /* Activity Log Item */
-    .activity-item {
-        background: rgba(15, 23, 42, 0.6);
-        border-left: 3px solid #00F0FF;
-        padding: 10px 14px;
-        border-radius: 0 8px 8px 0;
-        margin-bottom: 10px;
-        font-size: 0.85rem;
-    }
-
-    /* Stat Box */
-    .metric-card {
-        background: rgba(15, 23, 42, 0.8);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+    /* KPI Metrics */
+    .kpi-box {
+        background: #111827;
+        border: 1px solid #1F2937;
         border-radius: 10px;
         padding: 16px;
         text-align: center;
     }
-    .metric-val {
-        font-size: 2rem;
+    .kpi-number {
+        font-size: 1.8rem;
         font-weight: 800;
-        color: #00F0FF;
+        color: #38BDF8;
+        line-height: 1.2;
     }
-    .metric-label {
-        font-size: 0.8rem;
+    .kpi-label {
+        font-size: 0.75rem;
         color: #94A3B8;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         margin-top: 4px;
     }
 
-    /* Skill Chip */
-    .skill-chip {
+    /* Skill Tags */
+    .skill-tag {
         display: inline-block;
-        background: rgba(255, 255, 255, 0.06);
+        background: #1E293B;
         color: #E2E8F0;
-        font-size: 0.8rem;
-        padding: 3px 10px;
-        border-radius: 6px;
+        font-size: 0.78rem;
+        padding: 2px 8px;
+        border-radius: 4px;
         margin: 2px 4px 2px 0;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        border: 1px solid #334155;
+    }
+
+    /* Activity Log Entry */
+    .log-entry {
+        background: #111827;
+        border-left: 3px solid #38BDF8;
+        padding: 10px 14px;
+        border-radius: 0 8px 8px 0;
+        margin-bottom: 10px;
+        font-size: 0.85rem;
     }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
+# Parse Query Parameters for Direct Candidate Interview Links (?token=...)
+query_params = st.query_params
+url_token = query_params.get("token")
+
 # Initialize Session State
-if "portal_view" not in st.session_state:
-    st.session_state.portal_view = "Admin Portal"
+if "active_portal" not in st.session_state:
+    st.session_state.active_portal = "Candidate Portal" if url_token else "Admin Portal"
 
-if "authenticated_candidate" not in st.session_state:
-    st.session_state.authenticated_candidate = None
+if "candidate_token" not in st.session_state:
+    st.session_state.candidate_token = url_token if url_token else ""
 
-if "agent" not in st.session_state:
-    st.session_state.agent = InterviewPilotAgent()
+if "candidate_agent" not in st.session_state:
+    st.session_state.candidate_agent = None
 
-if "candidate_answer_input" not in st.session_state:
-    st.session_state.candidate_answer_input = ""
+if "interview_started" not in st.session_state:
+    st.session_state.interview_started = False
 
-if "candidate_followup_input" not in st.session_state:
-    st.session_state.candidate_followup_input = ""
+if "admin_search" not in st.session_state:
+    st.session_state.admin_search = ""
 
-if "approval_message" not in st.session_state:
-    st.session_state.approval_message = None
+if "admin_filter_job" not in st.session_state:
+    st.session_state.admin_filter_job = "ALL"
+
+if "admin_filter_status" not in st.session_state:
+    st.session_state.admin_filter_status = "ALL"
+
+if "toast_msg" not in st.session_state:
+    st.session_state.toast_msg = None
 
 
-agent: InterviewPilotAgent = st.session_state.agent
+# Display Toast notifications if queued
+if st.session_state.toast_msg:
+    st.toast(st.session_state.toast_msg)
+    st.session_state.toast_msg = None
 
 
 # ============================================================================
-# SIDEBAR NAVIGATION
+# SIDEBAR
 # ============================================================================
 with st.sidebar:
-    st.markdown("### 🤖 TALENTPILOT AI")
-    st.caption("Autonomous Technical Screening & Hiring Agent")
+    st.markdown("### 🎯 TALENTPILOT AI")
+    st.caption("Production Recruitment & Screening System")
     st.markdown("---")
 
-    # Portal Selector
-    st.markdown("#### 🌐 Active Gateway")
-    selected_view = st.radio(
-        "Select Portal",
-        ["🛡️ Admin & Recruiter Portal", "🎓 Candidate Interview Gateway"],
-        index=0 if st.session_state.portal_view == "Admin Portal" else 1
-    )
+    # Portal Switcher
+    portal_options = ["🛡️ Admin Portal", "🎓 Candidate Interview Portal"]
+    current_idx = 0 if st.session_state.active_portal == "Admin Portal" else 1
 
-    if selected_view == "🛡️ Admin & Recruiter Portal" and st.session_state.portal_view != "Admin Portal":
-        st.session_state.portal_view = "Admin Portal"
-        st.rerun()
-    elif selected_view == "🎓 Candidate Interview Gateway" and st.session_state.portal_view != "Candidate Portal":
-        st.session_state.portal_view = "Candidate Portal"
+    selected_portal = st.radio("Navigation View", portal_options, index=current_idx)
+
+    target_portal = "Admin Portal" if "Admin" in selected_portal else "Candidate Portal"
+    if target_portal != st.session_state.active_portal:
+        st.session_state.active_portal = target_portal
         st.rerun()
 
     st.markdown("---")
 
-    if st.session_state.portal_view == "Admin Portal":
-        st.markdown("#### ⚡ 1-Click Presenter Shortcut")
-        if st.button("🚀 Auto-Approve & Launch Sukrit", use_container_width=True, type="primary"):
-            # Auto approve Sukrit
-            res = approve_candidate("CAND-SE-8109")
-            sukrit_profile = res["candidate"]
-            st.session_state.authenticated_candidate = sukrit_profile
-
-            # Initialize agent for Sukrit
-            parsed_resume = parse_resume(sukrit_profile.resume_text)
-            role_def = get_role_definition(sukrit_profile.role)
-            agent.reset_interview()
-            agent.plan_interview(parsed_resume, role_def["description"])
-
-            st.session_state.portal_view = "Candidate Portal"
-            st.success(f"Approved {sukrit_profile.name} & launched interview!")
-            st.rerun()
-
+    # Sidebar context information
+    if st.session_state.active_portal == "Admin Portal":
+        st.markdown("#### 👤 Admin Role: Recruitment Manager")
+        st.caption("Authorized to review candidates, approve first-round invitations, review scorecards, and approve second rounds.")
+        st.info("🔒 Note: Manual 'Launch Interview' actions have been removed. Candidates conduct interviews independently via secure invitation links.")
     else:
-        # Candidate Portal Sidebar info
-        if st.session_state.authenticated_candidate:
-            c = st.session_state.authenticated_candidate
-            st.markdown(f"**Candidate:** `{c.name}`")
-            st.markdown(f"**Target Role:** `{c.role}`")
-            st.markdown(f"**Progress:** `{agent.state.current_index}/{len(agent.state.questions)} Questions`")
-            st.markdown(f"**Status:** `{agent.state.status}`")
+        st.markdown("#### 🎓 Candidate Screening Gateway")
+        st.caption("Candidate-facing interface. Access is isolated and validated via unique cryptographic invitation tokens.")
+        if st.session_state.candidate_token:
+            st.markdown(f"**Token:** `{st.session_state.candidate_token[:12]}...`")
 
-            if st.button("🚪 Logout Candidate", use_container_width=True):
-                st.session_state.authenticated_candidate = None
-                st.session_state.portal_view = "Admin Portal"
+    st.markdown("---")
+    st.caption("⚡ Powered by TalentPilot Agentic Interview Engine • SQLite Relational Store")
+
+
+# ============================================================================
+# VIEW 1: CANDIDATE INTERVIEW PORTAL (ISOLATED EXPERIENCE)
+# ============================================================================
+if st.session_state.active_portal == "Candidate Portal":
+
+    # Step 4: Token Validation
+    token_to_verify = st.session_state.candidate_token.strip()
+
+    if not token_to_verify:
+        st.markdown("## 🔐 Candidate Interview Gateway")
+        st.markdown("Please enter the **Interview Invitation Token** from your official invitation email, or open the link directly from your email.")
+
+        c_col1, c_col2 = st.columns([1.2, 1])
+        with c_col1:
+            st.markdown("""
+            <div class="saas-card">
+                <h4 style="color:#38BDF8; margin-top:0;">Access Your Screening Room</h4>
+                <p style="color:#94A3B8; font-size:0.9rem;">
+                    Your invitation link contains a secure cryptographic token. You can also paste it below:
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            token_input = st.text_input("Interview Token", placeholder="e.g. jA9eK3_z9L...")
+
+            # Quick-Load Helper for Demonstration
+            st.markdown("**⚡ Live Demonstration Shortcut:**")
+            invited_cands = [c for c in get_candidates_list() if c.get("token")]
+            if invited_cands:
+                sample_cand = invited_cands[0]
+                if st.button(f"⚡ Load {sample_cand['name']}'s Active Token ({sample_cand['token'][:10]}...)", use_container_width=True):
+                    st.session_state.candidate_token = sample_cand["token"]
+                    st.rerun()
+            else:
+                st.caption("No active interview sessions yet. Approve a candidate in the Admin Portal to generate an invitation link.")
+
+            if st.button("🔓 Validate Token & Enter", type="primary", use_container_width=True):
+                if token_input.strip():
+                    st.session_state.candidate_token = token_input.strip()
+                    st.rerun()
+                else:
+                    st.warning("Please enter your invitation token.")
+
+        with c_col2:
+            st.markdown("""
+            <div class="saas-card">
+                <h4>📋 Interview Instructions</h4>
+                <p style="color:#CBD5E1; font-size:0.88rem; line-height: 1.6;">
+                    • <strong>8–10 Tailored Questions:</strong> The interview covers core technical depth, system troubleshooting, behavioral ownership, and communication.<br>
+                    • <strong>Adaptive Follow-up:</strong> The interviewer asks follow-ups when an answer needs technical depth.<br>
+                    • <strong>Estimated Time:</strong> 20–25 minutes.<br>
+                    • <strong>Privacy:</strong> Your interview is isolated and submitted directly to hiring managers for human review.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.stop()
+
+    # Validate the token
+    val_res = validate_candidate_interview_token(token_to_verify)
+
+    if not val_res["valid"]:
+        if val_res.get("completed"):
+            st.success(f"🎉 Thank you, {val_res.get('candidate_name', 'Candidate')}! Your interview for the {val_res.get('job_title', 'selected')} position has already been completed and submitted.")
+            st.info("Our recruitment team is reviewing your evaluation. Further details regarding the second round will be sent to your email.")
+            if st.button("Enter New Token"):
+                st.session_state.candidate_token = ""
+                st.rerun()
+            st.stop()
+        else:
+            st.error(f"⚠️ {val_res['reason']}")
+            if st.button("Try Another Token"):
+                st.session_state.candidate_token = ""
+                st.rerun()
+            st.stop()
+
+    session_data = val_res["session"]
+    candidate_id = session_data["candidate_id"]
+    job_title = session_data["job_title"]
+    cand_name = session_data["candidate_name"]
+
+    # Initialize Interview Agent for this Candidate Session if not yet in state
+    if st.session_state.candidate_agent is None or getattr(st.session_state.candidate_agent, "session_id", None) != session_data["id"]:
+        agent = InterviewPilotAgent()
+        agent.session_id = session_data["id"]
+
+        # Load plan questions from database
+        plan_questions = session_data["plan_questions"]
+        if plan_questions:
+            from agent import Question
+            agent.state.questions = [Question(**q) for q in plan_questions]
+            agent.state.candidate_name = cand_name
+            agent.state.job_description = session_data["job_description"]
+            agent.state.resume = parse_resume(session_data["resume_text"])
+            agent.state.current_index = session_data.get("current_question_index", 0)
+        else:
+            # Fallback formulation if plan was missing
+            parsed_resume = parse_resume(session_data["resume_text"])
+            agent.plan_interview(parsed_resume, session_data["job_description"])
+
+        # Check existing QA turns to restore state if interrupted
+        existing_turns = get_qa_turns_by_session_id(session_data["id"])
+        agent.state.current_index = len(existing_turns)
+        agent.state.status = "IN_PROGRESS" if len(existing_turns) > 0 else "INVITED"
+
+        st.session_state.candidate_agent = agent
+        st.session_state.interview_started = (len(existing_turns) > 0 or session_data["status"] == "IN_PROGRESS")
+
+    agent = st.session_state.candidate_agent
+
+    # ------------------------------------------------------------------------
+    # SCREEN 1: WELCOME SCREEN (Interviews only start when candidate clicks Start)
+    # ------------------------------------------------------------------------
+    if not st.session_state.interview_started:
+        st.markdown(f"## 🎙️ Welcome, <span style='color:#38BDF8;'>{cand_name}</span>", unsafe_allow_html=True)
+        st.markdown(f"#### First-Round Technical Screening for **{job_title}** ({session_data['job_department']})")
+
+        w_col1, w_col2 = st.columns([1.5, 1])
+        with w_col1:
+            st.markdown("""
+            <div class="saas-card">
+                <h3 style="color:#FFFFFF; margin-top:0;">About This Screening Interview</h3>
+                <p style="color:#CBD5E1; font-size:1rem; line-height: 1.6;">
+                    You have been invited to complete an interactive, AI-facilitated technical screening.
+                    The interviewer agent will ask you <strong>8 to 10 tailored questions</strong> based on your background and the role requirements.
+                </p>
+                <div style="background: rgba(59, 130, 246, 0.08); border-left: 3px solid #3B82F6; padding: 12px 16px; border-radius: 6px; margin: 16px 0;">
+                    <p style="margin:0; font-size:0.92rem; color:#E2E8F0;">
+                        ⏱️ <strong>Estimated Duration:</strong> 20–25 minutes<br>
+                        🎯 <strong>Format:</strong> One question at a time. The interviewer may ask a follow-up probe if an answer lacks technical detail.<br>
+                        🔒 <strong>Human Oversight:</strong> All scores are grounded in your verbatim responses and reviewed by human hiring managers.
+                    </p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("🚀 Start Interview", type="primary", use_container_width=True):
+                start_candidate_interview(token_to_verify)
+                st.session_state.interview_started = True
+                agent.state.status = "IN_PROGRESS"
                 st.rerun()
 
-    st.markdown("---")
-    st.caption("🔒 100% Offline Rule-Based Agentic Engine. No paid API key required.")
+        with w_col2:
+            st.markdown("""
+            <div class="saas-card">
+                <h4>💡 Tips for Success</h4>
+                <p style="color:#94A3B8; font-size:0.88rem; line-height:1.6;">
+                    • Be specific about tools, architectures, and metrics.<br>
+                    • Mention trade-offs and reasons behind your decisions.<br>
+                    • Answer questions in your own words.<br>
+                    • Your session progress is saved automatically.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
 
+        st.stop()
 
-# ============================================================================
-# VIEW 1: RECRUITER & ADMIN PORTAL
-# ============================================================================
-if st.session_state.portal_view == "Admin Portal":
-    st.markdown("## 🛡️ Recruiter & Talent Acquisition Dashboard")
-    st.markdown("AI-driven talent sourcing, multi-role shortlisting, candidate approvals, and automated Gmail interview dispatching.")
+    # ------------------------------------------------------------------------
+    # SCREEN 2: ACTIVE INTERVIEW ROOM
+    # ------------------------------------------------------------------------
+    st.markdown(f"## 🎙️ Screening Session: <span style='color:#38BDF8;'>{cand_name}</span>", unsafe_allow_html=True)
+    st.caption(f"Role: **{job_title}** • Session ID: `{session_data['id']}`")
 
-    all_cands = get_candidates()
-    total_shortlisted = len(all_cands)
-    total_approved = sum(1 for c in all_cands if "Approved" in c.status or "Completed" in c.status)
-    total_completed = sum(1 for c in all_cands if c.status == "Interview Completed")
+    curr_q = agent.get_current_question()
+    total_q = len(agent.state.questions)
 
-    # Top KPI Cards
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val">{len(get_all_roles())}</div>
-            <div class="metric-label">Active Recruiting Roles</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with k2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val">{total_shortlisted}</div>
-            <div class="metric-label">AI Shortlisted Profiles</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with k3:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val" style="color:#A855F7;">{total_approved}</div>
-            <div class="metric-label">Invitations Dispatched</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with k4:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-val" style="color:#10B981;">{total_completed}</div>
-            <div class="metric-label">Completed Interviews</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # When all questions are completed
+    if agent.state.status == "COMPLETED" or agent.state.current_index >= total_q:
+        # Run final completion tools if not already marked completed
+        if session_data["status"] != "COMPLETED":
+            with st.spinner("Compiling transcript and running consistency audits..."):
+                agent._finalize_interview()
+                complete_res = complete_candidate_interview(session_data["id"], candidate_id, agent.state)
 
-    # Show approval banner if recent
-    if st.session_state.approval_message:
-        msg = st.session_state.approval_message
-        st.markdown(f"""
-        <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 10px; padding: 16px 20px; margin: 18px 0;">
-            <h4 style="color:#34D399; margin: 0 0 6px 0;">🎉 {msg['headline']}</h4>
-            <p style="margin: 0; color: #E2E8F0; font-size: 0.95rem;">
-                Official invitation sent to: <strong>{msg['email']}</strong> | Access ID: <code>{msg['access_id']}</code> | Passcode: <code>{msg['access_code']}</code>
+        st.markdown("""
+        <div class="saas-card" style="text-align: center; padding: 40px 20px;">
+            <div style="font-size: 3rem; margin-bottom: 10px;">🎉</div>
+            <h2 style="color: #34D399; margin: 0 0 10px 0;">Interview Successfully Completed!</h2>
+            <p style="color: #CBD5E1; font-size: 1.1rem; max-width: 650px; margin: 0 auto 20px auto; line-height: 1.6;">
+                Thank you for completing your first-round technical screening interview for the <strong>""" + job_title + """</strong> position.
+                Your responses, code architecture explanations, and transcript have been securely submitted to our talent acquisition team.
             </p>
+            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 14px 20px; display: inline-block; text-align: left; margin-bottom: 20px;">
+                <strong style="color: #34D399;">What happens next?</strong><br>
+                <span style="color: #E2E8F0; font-size: 0.92rem;">
+                    1. A human hiring manager reviews your complete evaluation scorecard.<br>
+                    2. If selected for the second round, you will automatically receive an official scheduling notification via email.<br>
+                    3. No further action is required from you at this time.
+                </span>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("⬅️ Exit Screening Portal", use_container_width=True):
+            st.session_state.candidate_token = ""
+            st.session_state.interview_started = False
+            st.session_state.candidate_agent = None
+            st.session_state.active_portal = "Admin Portal"
+            st.rerun()
 
-    # Admin Tabs
-    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs([
-        "🗂️ Candidate Role Buckets & Approvals",
-        "📨 Live Email Dispatch Terminal",
-        "📊 Completed Interview Audits",
-        "➕ Sourcing AI & Resume Ingestion"
-    ])
+        st.stop()
 
-    # ------------------------------------------------------------------------
-    # TAB 1: Role Buckets & Candidate Cards
-    # ------------------------------------------------------------------------
-    with admin_tab1:
-        col_f1, col_f2 = st.columns([1, 2])
-        with col_f1:
-            role_options = ["All Roles"] + get_all_roles()
-            selected_role = st.selectbox("Filter by Profile Role Bucket:", role_options, index=0)
+    # Active Question Display
+    q_col, act_col = st.columns([1.6, 1.0])
 
-        candidates_to_display = get_candidates(selected_role)
-        st.caption(f"Showing {len(candidates_to_display)} candidate(s) under **{selected_role}**")
+    with q_col:
+        progress_val = min(1.0, agent.state.current_index / max(1, total_q))
+        st.progress(progress_val)
+        st.caption(f"Question **{agent.state.current_index + 1} of {total_q}** • Domain: **{curr_q.competency if curr_q else 'In Progress'}**")
 
-        for cand in candidates_to_display:
-            skills_html = "".join([f'<span class="skill-chip">{s}</span>' for s in cand.skills])
-            status_badge = "badge-green" if "Completed" in cand.status else ("badge-purple" if "Approved" in cand.status else "badge-cyan")
+        if curr_q:
+            st.markdown(f"""
+            <div class="question-panel">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span class="status-pill pill-blue">{curr_q.competency}</span>
+                    <span class="status-pill pill-purple">Level: {agent.state.current_difficulty.upper()}</span>
+                </div>
+                <h3 style="margin-top: 14px; color: #FFFFFF;">Question #{curr_q.id}</h3>
+                <p style="font-size: 1.15rem; line-height: 1.6; color: #F1F5F9;">{curr_q.text}</p>
+                <div style="background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 6px; border-left: 2px solid #38BDF8; margin-top: 12px;">
+                    <small style="color: #94A3B8;">Targeting Resume Claim: <em>"{curr_q.targeted_resume_claim}"</em></small>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-            with st.container():
+            # Adaptive follow-up probe mode
+            if agent.state.status == "AWAITING_FOLLOWUP":
                 st.markdown(f"""
-                <div class="candidate-card">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div>
-                            <span class="badge-pill {status_badge}">{cand.status}</span>
-                            <span class="badge-pill badge-cyan" style="margin-left: 8px;">{cand.role}</span>
-                            <h3 style="margin: 10px 0 4px 0; color: #FFFFFF; font-size: 1.4rem;">{cand.name}</h3>
-                            <p style="margin: 0; color: #94A3B8; font-size: 0.9rem;">
-                                📧 {cand.email} • 💼 {cand.experience_years} Years Experience • ID: <code>{cand.id}</code>
-                            </p>
-                        </div>
-                        <div style="text-align: right;">
-                            <div style="font-size: 1.8rem; font-weight: 800; color: #00F0FF;">{cand.match_score}%</div>
-                            <div style="font-size: 0.75rem; color: #94A3B8; text-transform: uppercase;">Role Match Score</div>
-                        </div>
-                    </div>
-                    <div style="margin: 14px 0 8px 0;">
-                        <small style="color:#94A3B8; text-transform:uppercase; font-size:0.75rem; font-weight:bold;">Matched Competencies & Skills:</small><br>
-                        {skills_html}
-                    </div>
-                    <p style="font-size: 0.95rem; color: #CBD5E1; line-height: 1.5; margin: 10px 0;">
-                        <strong>Agentic Sourcing Summary:</strong> {cand.resume_summary}
-                    </p>
+                <div class="followup-panel">
+                    <span class="status-pill pill-amber">⚡ Adaptive Follow-up Probe</span>
+                    <h4 style="margin-top: 10px; color: #FBBF24;">Interviewer Follow-up Question</h4>
+                    <p style="font-size: 1.05rem; color: #F1F5F9; line-height: 1.5;">{agent.state.active_followup}</p>
+                    <small style="color: #CBD5E1;">Please provide additional technical specifics, trade-offs, or production metrics.</small>
                 </div>
                 """, unsafe_allow_html=True)
 
-                c_btn1, c_btn2, c_btn3 = st.columns([1.4, 1.2, 1.2])
+                followup_ans = st.text_area(
+                    "Your Follow-up Answer",
+                    height=130,
+                    placeholder="Elaborate with specific libraries, architecture decisions, or error recovery..."
+                )
 
-                with c_btn1:
-                    if cand.status == "Shortlisted":
-                        if st.button(f"✅ Approve & Send Gmail to {cand.name.split()[0]}", key=f"app_{cand.id}", type="primary", use_container_width=True):
-                            res = approve_candidate(cand.id)
-                            st.session_state.approval_message = {
-                                "headline": f"Candidate Approved: {cand.name}",
-                                "email": cand.email,
-                                "access_id": res["access_id"],
-                                "access_code": res["access_code"]
-                            }
+                f_btn1, f_btn2 = st.columns(2)
+                with f_btn1:
+                    if st.button("⚡ Quick-Fill Strong Follow-up Answer", use_container_width=True):
+                        followup_ans = SAMPLE_RESPONSES["strong"]["text"]
+                        agent.submit_answer(followup_ans)
+                        record_turn_answer(
+                            session_id=session_data["id"],
+                            question_id=curr_q.id,
+                            competency=curr_q.competency,
+                            difficulty=agent.state.current_difficulty,
+                            question_text=curr_q.text,
+                            targeted_claim=curr_q.targeted_resume_claim or "",
+                            candidate_answer=agent.state.history[-1].answer,
+                            followup_question=agent.state.active_followup,
+                            followup_answer=followup_ans,
+                            score=agent.state.history[-1].final_score,
+                            completeness=agent.state.history[-1].evaluation.completeness,
+                            evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
+                            rubric_match=agent.state.history[-1].evaluation.rubric_match,
+                            strengths=agent.state.history[-1].evaluation.strengths,
+                            gaps=agent.state.history[-1].evaluation.gaps
+                        )
+                        st.rerun()
+
+                with f_btn2:
+                    if st.button("📤 Submit Follow-up", type="primary", use_container_width=True):
+                        if followup_ans.strip():
+                            agent.submit_answer(followup_ans)
+                            record_turn_answer(
+                                session_id=session_data["id"],
+                                question_id=curr_q.id,
+                                competency=curr_q.competency,
+                                difficulty=agent.state.current_difficulty,
+                                question_text=curr_q.text,
+                                targeted_claim=curr_q.targeted_resume_claim or "",
+                                candidate_answer=agent.state.history[-1].answer,
+                                followup_question=agent.state.active_followup,
+                                followup_answer=followup_ans,
+                                score=agent.state.history[-1].final_score,
+                                completeness=agent.state.history[-1].evaluation.completeness,
+                                evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
+                                rubric_match=agent.state.history[-1].evaluation.rubric_match,
+                                strengths=agent.state.history[-1].evaluation.strengths,
+                                gaps=agent.state.history[-1].evaluation.gaps
+                            )
                             st.rerun()
+                        else:
+                            st.warning("Please provide a response before submitting.")
+
+            else:
+                candidate_ans = st.text_area(
+                    "Your Answer",
+                    height=140,
+                    placeholder="Type or paste your technical answer here..."
+                )
+
+                st.markdown("**⚡ Live Evaluation Quick-Fill Controls:**")
+                b_c1, b_c2 = st.columns(2)
+                with b_c1:
+                    if st.button("⚠️ Test Shallow Answer (Triggers Follow-up)", use_container_width=True):
+                        candidate_ans = SAMPLE_RESPONSES["shallow"]["text"]
+                        agent.submit_answer(candidate_ans)
+                        st.rerun()
+                with b_c2:
+                    if st.button("✅ Test Strong Answer (Advances with Score 5)", use_container_width=True):
+                        candidate_ans = SAMPLE_RESPONSES["strong"]["text"]
+                        res = agent.submit_answer(candidate_ans)
+                        record_turn_answer(
+                            session_id=session_data["id"],
+                            question_id=curr_q.id,
+                            competency=curr_q.competency,
+                            difficulty=agent.state.current_difficulty,
+                            question_text=curr_q.text,
+                            targeted_claim=curr_q.targeted_resume_claim or "",
+                            candidate_answer=candidate_ans,
+                            followup_question=None,
+                            followup_answer=None,
+                            score=agent.state.history[-1].final_score,
+                            completeness=agent.state.history[-1].evaluation.completeness,
+                            evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
+                            rubric_match=agent.state.history[-1].evaluation.rubric_match,
+                            strengths=agent.state.history[-1].evaluation.strengths,
+                            gaps=agent.state.history[-1].evaluation.gaps
+                        )
+                        st.rerun()
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("📤 Submit Answer", type="primary", use_container_width=True):
+                    if candidate_ans.strip():
+                        res = agent.submit_answer(candidate_ans)
+                        if res.get("status") != "followup_required":
+                            record_turn_answer(
+                                session_id=session_data["id"],
+                                question_id=curr_q.id,
+                                competency=curr_q.competency,
+                                difficulty=agent.state.current_difficulty,
+                                question_text=curr_q.text,
+                                targeted_claim=curr_q.targeted_resume_claim or "",
+                                candidate_answer=candidate_ans,
+                                followup_question=None,
+                                followup_answer=None,
+                                score=agent.state.history[-1].final_score,
+                                completeness=agent.state.history[-1].evaluation.completeness,
+                                evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
+                                rubric_match=agent.state.history[-1].evaluation.rubric_match,
+                                strengths=agent.state.history[-1].evaluation.strengths,
+                                gaps=agent.state.history[-1].evaluation.gaps
+                            )
+                        st.rerun()
                     else:
-                        st.info(f"🔑 Passcode: `{cand.access_code}` | Sent: `{cand.invitation_sent_at}`")
+                        st.warning("Please enter your answer before submitting.")
 
-                with c_btn2:
-                    if cand.status != "Shortlisted":
-                        if st.button(f"🚀 Launch Interview ({cand.name.split()[0]})", key=f"launch_{cand.id}", use_container_width=True):
-                            st.session_state.authenticated_candidate = cand
-                            parsed = parse_resume(cand.resume_text)
-                            role_def = get_role_definition(cand.role)
-                            agent.reset_interview()
-                            agent.plan_interview(parsed, role_def["description"])
-                            st.session_state.portal_view = "Candidate Portal"
-                            st.rerun()
+    # Timeline Column
+    with act_col:
+        st.markdown("### 🧠 Live Agent Activity Panel")
+        st.caption("Verifiable Python tool executions:")
 
-                with c_btn3:
-                    with st.popover("📄 View Resume Claims"):
-                        st.markdown(f"### {cand.name} — Full Resume")
-                        st.text_area("Resume Content", value=cand.resume_text, height=280)
+        logs = get_activity_logs()
+        if not logs:
+            st.info("Tool executions appear here in real-time as you submit answers.")
+        else:
+            for log in reversed(logs[-8:]):
+                st.markdown(f"""
+                <div class="log-entry">
+                    <div style="display:flex; justify-content:space-between; color:#94A3B8; font-size:0.75rem;">
+                        <span>⚙️ <strong>{log.tool_name}()</strong></span>
+                        <span>{log.timestamp} ({log.execution_ms}ms)</span>
+                    </div>
+                    <div style="color: #38BDF8; font-weight:600; margin: 4px 0;">{log.result_summary}</div>
+                    <div style="color: #CBD5E1; font-size: 0.8rem;"><em>Reasoning:</em> {log.agent_reasoning}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# VIEW 2: ADMIN PORTAL (DEDICATED RECRUITER & SOURCING INTERFACE)
+# ============================================================================
+elif st.session_state.active_portal == "Admin Portal":
+    st.markdown("## 🛡️ Talent Acquisition & Screening Command Center")
+    st.caption("Enterprise AI-Powered Screening: Candidate Management • Automated Invitations • Completed Scorecard Audits")
+
+    # 1. Top Real-Time KPI Cards (From SQLite Backend)
+    metrics = get_pipeline_overview_metrics()
+
+    k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
+    with k1:
+        st.markdown(f'<div class="kpi-box"><div class="kpi-number">{metrics["total_candidates"]}</div><div class="kpi-label">Total Sourced</div></div>', unsafe_allow_html=True)
+    with k2:
+        st.markdown(f'<div class="kpi-box"><div class="kpi-number" style="color:#60A5FA;">{metrics["shortlisted"]}</div><div class="kpi-label">Shortlisted</div></div>', unsafe_allow_html=True)
+    with k3:
+        st.markdown(f'<div class="kpi-box"><div class="kpi-number" style="color:#C084FC;">{metrics["invitations_sent"]}</div><div class="kpi-label">Invitations Sent</div></div>', unsafe_allow_html=True)
+    with k4:
+        st.markdown(f'<div class="kpi-box"><div class="kpi-number" style="color:#FBBF24;">{metrics["in_progress"]}</div><div class="kpi-label">In Progress</div></div>', unsafe_allow_html=True)
+    with k5:
+        st.markdown(f'<div class="kpi-box"><div class="kpi-number" style="color:#34D399;">{metrics["completed"]}</div><div class="kpi-label">Completed</div></div>', unsafe_allow_html=True)
+    with k6:
+        st.markdown(f'<div class="kpi-box"><div class="kpi-number" style="color:#F87171;">{metrics["pending_review"]}</div><div class="kpi-label">Pending Review</div></div>', unsafe_allow_html=True)
+    with k7:
+        st.markdown(f'<div class="kpi-box"><div class="kpi-number" style="color:#10B981;">{metrics["second_round_approved"]}</div><div class="kpi-label">Round 2 Approved</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Admin Navigation Tabs
+    tab_candidates, tab_pipeline, tab_scorecards, tab_email_activity = st.tabs([
+        "👥 Candidate Management (Shortlist Review)",
+        "📊 Interview Pipeline Kanban",
+        "📑 Completed Interview Scorecards & Audit",
+        "📨 Email Delivery & Activity Log"
+    ])
+
+    # ------------------------------------------------------------------------
+    # TAB 1: CANDIDATE MANAGEMENT (STEP 1: REVIEW SHORTLISTED CANDIDATES)
+    # ------------------------------------------------------------------------
+    with tab_candidates:
+        st.markdown("### Step 1: Review Shortlisted Candidates")
+        st.markdown("Review candidate resumes, inspect AI match scores, and execute **Approve for First-Round Interview** to automatically dispatch secure interview invitations.")
+
+        # Filters and Search
+        f_c1, f_c2, f_c3 = st.columns([1.5, 1.2, 1.2])
+        with f_c1:
+            search_query = st.text_input("🔍 Search by Candidate Name or Email", value=st.session_state.admin_search)
+            st.session_state.admin_search = search_query
+        with f_c2:
+            all_jobs = get_all_jobs()
+            job_choices = ["ALL"] + [j["id"] for j in all_jobs]
+            job_labels = {j["id"]: f"{j['title']} ({j['department']})" for j in all_jobs}
+            job_labels["ALL"] = "All Positions"
+            sel_job = st.selectbox("Filter by Role:", job_choices, format_func=lambda x: job_labels.get(x, x))
+            st.session_state.admin_filter_job = sel_job
+        with f_c3:
+            status_choices = ["ALL", "SHORTLISTED", "FIRST_ROUND_APPROVED", "INVITED", "IN_PROGRESS", "COMPLETED", "SECOND_ROUND_APPROVED", "ON_HOLD", "INVITATION_FAILED"]
+            sel_status = st.selectbox("Filter by Status:", status_choices)
+            st.session_state.admin_filter_status = sel_status
+
+        candidates = get_candidates_list(
+            status_filter=st.session_state.admin_filter_status,
+            job_filter=st.session_state.admin_filter_job,
+            search=st.session_state.admin_search
+        )
+
+        st.caption(f"Showing **{len(candidates)}** candidate(s)")
+
+        for c in candidates:
+            # Status Badge Styling
+            st_class = "pill-blue"
+            if c["workflow_status"] == "SHORTLISTED":
+                st_class = "pill-blue"
+            elif c["workflow_status"] in ("INVITED", "FIRST_ROUND_APPROVED"):
+                st_class = "pill-purple"
+            elif c["workflow_status"] == "IN_PROGRESS":
+                st_class = "pill-amber"
+            elif c["workflow_status"] in ("COMPLETED", "SECOND_ROUND_APPROVED"):
+                st_class = "pill-emerald"
+            elif c["workflow_status"] == "INVITATION_FAILED":
+                st_class = "pill-red"
+
+            skills_html = "".join([f'<span class="skill-tag">{s}</span>' for s in c["skills"][:6]])
+            score_str = f"{c['overall_score']}/5.0" if c.get("overall_score") is not None else "Pending"
+            token_str = "Generated" if c.get("token") else "Pending Approval"
+            email_status_str = c.get("last_email_status") or "Not Sent"
+
+            with st.container():
+                st.markdown(f"""
+                <div class="candidate-row-card">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div>
+                            <span class="status-pill {st_class}">{c["workflow_status"]}</span>
+                            <span style="color:#94A3B8; font-size:0.85rem; margin-left: 10px;">ID: <code>{c["id"]}</code></span>
+                            <h3 style="margin: 8px 0 4px 0; color: #FFFFFF; font-size: 1.35rem;">{c["name"]}</h3>
+                            <p style="margin: 0; color: #38BDF8; font-size: 0.95rem; font-weight:600;">
+                                {c["job_title"]} • {c["job_department"]}
+                            </p>
+                            <p style="margin: 4px 0 0 0; color: #94A3B8; font-size: 0.88rem;">
+                                📧 {c["email"]} • 💼 {c["experience_years"]} Years Experience
+                            </p>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 1.8rem; font-weight: 800; color: #38BDF8;">{c["match_score"]}%</div>
+                            <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase;">Use Case 1 Match</div>
+                        </div>
+                    </div>
+                    <div style="margin: 12px 0 8px 0;">
+                        {skills_html}
+                    </div>
+                    <p style="color: #CBD5E1; font-size: 0.92rem; line-height: 1.5; margin: 8px 0;">
+                        <strong>Profile Summary:</strong> {c["resume_summary"]}
+                    </p>
+                    <div style="display:flex; gap:15px; font-size:0.8rem; color:#94A3B8; margin-top:8px;">
+                        <span>Email Status: <strong>{email_status_str}</strong></span>
+                        <span>Interview Link: <strong>{token_str}</strong></span>
+                        <span>Scorecard: <strong>{score_str}</strong></span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                btn_col1, btn_col2 = st.columns([1.5, 1.0])
+
+                with btn_col1:
+                    # Action: Approve for First-Round Interview
+                    if c["workflow_status"] in ("SHORTLISTED", "INVITATION_FAILED"):
+                        if st.button(f"✅ Approve for First-Round Interview ({c['name']})", key=f"app_btn_{c['id']}", type="primary"):
+                            with st.spinner(f"Generating 8-10 question plan, creating session, and dispatching invitation to {c['email']}..."):
+                                res = approve_for_first_round(c["id"])
+                                if res["status"] == "success":
+                                    st.session_state.toast_msg = f"Approved {c['name']}! Invitation dispatched to {c['email']}."
+                                    st.rerun()
+                                else:
+                                    st.error(res["message"])
+
+                    elif c["workflow_status"] in ("INVITED", "FIRST_ROUND_APPROVED"):
+                        st.info(f"✉️ Invitation sent ({c.get('last_email_status', 'SENT')}). Candidate link is active.")
+                        if st.button(f"🔄 Resend Invitation Email ({c['name']})", key=f"resend_{c['id']}"):
+                            with st.spinner("Retrying email dispatch..."):
+                                retry_res = retry_candidate_invitation_email(c["id"])
+                                st.session_state.toast_msg = f"Email re-dispatched to {c['email']} ({retry_res['delivery_status']})"
+                                st.rerun()
+
+                    elif c["workflow_status"] in ("COMPLETED", "HUMAN_REVIEW_REQUIRED"):
+                        st.success(f"🎯 Interview Completed! Rating: {c.get('overall_score', 'N/A')}/5.0 — Review scorecard in Tab 3.")
+
+                    elif c["workflow_status"] == "SECOND_ROUND_APPROVED":
+                        st.markdown('<span class="status-pill pill-emerald">Approved for Second Round</span>', unsafe_allow_html=True)
+
+                    elif c["workflow_status"] == "ON_HOLD":
+                        st.markdown('<span class="status-pill pill-amber">Placed on Hold</span>', unsafe_allow_html=True)
+
+                with btn_col2:
+                    with st.popover("📄 Inspect Full Resume & Claims"):
+                        st.markdown(f"#### {c['name']} — Resume Details")
+                        st.markdown(f"**Target Role:** {c['job_title']}")
+                        st.text_area("Verifiable Resume Text", value=c["resume_text"], height=250)
 
                 st.markdown("<hr style='border-color: rgba(255,255,255,0.06); margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------------
-    # TAB 2: Live Email Dispatch Terminal
+    # TAB 2: INTERVIEW PIPELINE KANBAN
     # ------------------------------------------------------------------------
-    with admin_tab2:
-        st.markdown("### 📨 Automated Email Dispatch Terminal")
-        st.caption("Live audit trail of all invitation emails sent to shortlisted candidates (with generated credentials).")
+    with tab_pipeline:
+        st.markdown("### 📊 Recruitment Workflow Pipeline")
+        p_c1, p_c2, p_c3, p_c4, p_c5 = st.columns(5)
 
-        logs = get_dispatch_logs()
-        if not logs:
-            st.info("No invitation emails dispatched yet. Click 'Approve & Send Gmail' on any shortlisted candidate in Tab 1.")
-        else:
-            for log in reversed(logs):
-                with st.expander(f"✉️ {log['subject']} ➔ {log['recipient_email']} ({log['timestamp']})", expanded=True):
-                    col_m1, col_m2 = st.columns([1, 1])
-                    with col_m1:
-                        st.markdown(f"**Recipient:** `{log['recipient_name']} <{log['recipient_email']}>`")
-                        st.markdown(f"**Target Role:** `{log['role']}`")
-                        st.markdown(f"**Generated Access ID:** ` {log['access_id']} `")
-                        st.markdown(f"**Generated Passcode:** ` {log['access_code']} `")
-                        st.markdown(f"**Delivery Status:** `{log['smtp_status']}`")
-                    with col_m2:
-                        st.markdown("**Rendered Email Preview:**")
-                        st.components.v1.html(log["html_content"], height=320, scrolling=True)
+        stages = [
+            ("1. Shortlisted", "SHORTLISTED", p_c1),
+            ("2. Invited", "INVITED", p_c2),
+            ("3. In Progress", "IN_PROGRESS", p_c3),
+            ("4. Completed", "COMPLETED", p_c4),
+            ("5. Round 2 Approved", "SECOND_ROUND_APPROVED", p_c5)
+        ]
+
+        all_candidates = get_candidates_list()
+
+        for title, status_code, col in stages:
+            with col:
+                st.markdown(f"#### {title}")
+                stage_cands = [c for c in all_candidates if c["workflow_status"] == status_code or (status_code == "COMPLETED" and c["workflow_status"] == "HUMAN_REVIEW_REQUIRED")]
+                st.caption(f"{len(stage_cands)} candidate(s)")
+
+                for sc in stage_cands:
+                    st.markdown(f"""
+                    <div style="background: #111827; border: 1px solid #1F2937; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+                        <strong style="color: #FFFFFF;">{sc['name']}</strong><br>
+                        <small style="color: #94A3B8;">{sc['job_title']}</small><br>
+                        <span style="color:#38BDF8; font-size:0.75rem; font-weight:bold;">Match: {sc['match_score']}%</span>
+                    </div>
+                    """, unsafe_allow_html=True)
 
     # ------------------------------------------------------------------------
-    # TAB 3: Completed Interview Audits
+    # TAB 3: COMPLETED INTERVIEW SCORECARDS & AUDIT (STEP 7 & STEP 8)
     # ------------------------------------------------------------------------
-    with admin_tab3:
-        st.markdown("### 📊 Completed Interview Scorecards & Recruiter Audit")
-        completed_cands = [c for c in get_candidates() if c.status == "Interview Completed"]
+    with tab_scorecards:
+        st.markdown("### Step 7 & 8: Review Completed Interviews & Authorize Second Round")
+        st.markdown("Inspect objective, evidence-grounded AI evaluations. **No automated rejections:** Human recruiters make the definitive decision to **Approve for Second Round** or **Place on Hold**.")
+
+        # Find all candidates with completed scorecards
+        completed_cands = [c for c in get_candidates_list() if c.get("overall_score") is not None or c["workflow_status"] in ("COMPLETED", "HUMAN_REVIEW_REQUIRED", "SECOND_ROUND_APPROVED", "ON_HOLD")]
 
         if not completed_cands:
-            st.info("No candidates have completed their first-round interview yet. Launch an interview from Tab 1 to test the full lifecycle.")
+            st.info("No completed interviews yet. To test, open an active candidate link or use the Candidate Interview Portal.")
         else:
-            for c in completed_cands:
-                card = c.interview_scorecard or {}
-                st.markdown(f"""
-                <div class="glass-card">
-                    <div style="display:flex; justify-content:space-between;">
-                        <div>
-                            <h3>{c.name} ({c.role})</h3>
-                            <p>Email: {c.email} | Overall Score: <strong style="color:#00F0FF;">{card.get('overall_score', 'N/A')}/5.0</strong></p>
-                        </div>
-                        <div>
-                            <span class="badge-pill badge-green">{card.get('recommendation', 'COMPLETED')}</span>
-                        </div>
-                    </div>
-                    <p style="color:#94A3B8; font-size:0.9rem;">{card.get('rec_desc', '')}</p>
-                </div>
-                """, unsafe_allow_html=True)
+            for cand in completed_cands:
+                card = get_scorecard_by_candidate_id(cand["id"])
+                if not card:
+                    continue
 
-    # ------------------------------------------------------------------------
-    # TAB 4: Sourcing AI & Ingestion
-    # ------------------------------------------------------------------------
-    with admin_tab4:
-        st.markdown("### ➕ Sourcing Agent: Ingest & Auto-Classify New Resume")
-        st.markdown("Upload a PDF resume or paste raw text. The Sourcing AI will parse skills, calculate the role match score, and bucket the candidate automatically.")
+                rec_color = "#10B981" if card["recommendation"] == "ADVANCE" else ("#F59E0B" if card["recommendation"] == "HOLD" else "#EF4444")
 
-        in_c1, in_c2 = st.columns(2)
-        with in_c1:
-            new_name = st.text_input("Candidate Full Name", placeholder="e.g. Maya Lin")
-            new_email = st.text_input("Candidate Email (Gmail)", placeholder="e.g. maya.lin@gmail.com")
-            target_role = st.selectbox("Target Profile Role", get_all_roles())
-
-        with in_c2:
-            new_pdf = st.file_uploader("Upload Candidate Resume (PDF)", type=["pdf"])
-            new_text = st.text_area("Or Paste Resume Text", height=150, placeholder="Paste resume plain text here...")
-
-        if st.button("🚀 Ingest & Shortlist Candidate via AI", type="primary"):
-            raw_resume = ""
-            if new_pdf:
-                raw_resume = extract_text_from_pdf(new_pdf.read())
-            elif new_text:
-                raw_resume = new_text
-
-            if raw_resume:
-                new_cand = shortlist_uploaded_resume(new_name, new_email, target_role, raw_resume)
-                st.success(f"Candidate {new_cand.name} successfully shortlisted under {new_cand.role} with a Match Score of {new_cand.match_score}%!")
-                st.rerun()
-            else:
-                st.warning("Please upload a PDF or enter resume text.")
-
-
-# ============================================================================
-# VIEW 2: CANDIDATE INTERVIEW GATEWAY (ID & PASSCODE PROTECTED)
-# ============================================================================
-elif st.session_state.portal_view == "Candidate Portal":
-    # ------------------------------------------------------------------------
-    # STAGE A: Login Gateway
-    # ------------------------------------------------------------------------
-    if not st.session_state.authenticated_candidate:
-        st.markdown("## 🔐 Candidate First-Round Screening Gateway")
-        st.markdown("Please enter the unique **Access ID** and **Passcode** that were delivered to your Gmail inbox.")
-
-        gate_col1, gate_col2 = st.columns([1.2, 1])
-
-        with gate_col1:
-            st.markdown("""
-            <div class="glass-card">
-                <h3 style="color:#00F0FF; margin-top:0;">Secure Candidate Login</h3>
-                <p style="color:#94A3B8; font-size:0.9rem;">
-                    Your credentials were automatically generated and sent upon recruiter approval.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            login_id = st.text_input("Candidate Access ID or Gmail Address", placeholder="e.g. CAND-SE-8109 or sukrit.ss.31@gmail.com")
-            login_pass = st.text_input("Interview Access Passcode", type="password", placeholder="e.g. PILOT-XXXX")
-
-            # Quick-Fill Helper for effortless presentations
-            st.markdown("**⚡ Live Demo Quick-Credentials:**")
-            if st.button("⚡ Quick-Fill Sukrit's Approved Credentials", use_container_width=True):
-                # Ensure Sukrit is approved
-                approve_res = approve_candidate("CAND-SE-8109")
-                st.session_state.authenticated_candidate = approve_res["candidate"]
-
-                # Initialize interview agent for Sukrit
-                cand = st.session_state.authenticated_candidate
-                parsed = parse_resume(cand.resume_text)
-                role_def = get_role_definition(cand.role)
-                agent.reset_interview()
-                agent.plan_interview(parsed, role_def["description"])
-
-                st.success(f"Authenticated as {cand.name}! Entering interview room...")
-                st.rerun()
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🔓 Authenticate & Begin Interview", type="primary", use_container_width=True):
-                matched_cand = authenticate_candidate(login_id, login_pass)
-                if matched_cand:
-                    st.session_state.authenticated_candidate = matched_cand
-                    parsed = parse_resume(matched_cand.resume_text)
-                    role_def = get_role_definition(matched_cand.role)
-                    agent.reset_interview()
-                    agent.plan_interview(parsed, role_def["description"])
-                    st.success(f"Welcome, {matched_cand.name}! Launching your interview...")
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials. Please verify your Access ID and Passcode from your Gmail invitation.")
-
-        with gate_col2:
-            st.markdown("""
-            <div class="glass-card">
-                <h4>📋 What to Expect:</h4>
-                <p style="color:#CBD5E1; font-size:0.9rem; line-height: 1.6;">
-                    • <strong>Resume-Anchored Probing:</strong> The AI will ask about specific technical projects and metrics from your CV.<br>
-                    • <strong>Adaptive Follow-ups:</strong> If a response lacks depth, the agent will prompt for technical specifics.<br>
-                    • <strong>Zero Hallucination:</strong> Your scores are grounded in verbatim quotes from your answers.<br>
-                    • <strong>Recruiter Review:</strong> All results are submitted for final human recruiter evaluation.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # ------------------------------------------------------------------------
-    # STAGE B: Active Interview Room
-    # ------------------------------------------------------------------------
-    else:
-        cand: CandidateProfile = st.session_state.authenticated_candidate
-
-        st.markdown(f"## 🎙️ Screening Room: <span style='color:#00F0FF;'>{cand.name}</span>", unsafe_allow_html=True)
-        st.caption(f"Role: **{cand.role}** • Email: `{cand.email}` • Access ID: `{cand.id}`")
-
-        curr_q = agent.get_current_question()
-
-        # Two Columns: Left = Chat / Q&A, Right = Live Agent Activity
-        q_col, act_col = st.columns([1.6, 1.0])
-
-        with q_col:
-            # Progress Bar
-            progress_val = min(1.0, agent.state.current_index / max(1, len(agent.state.questions)))
-            st.progress(progress_val)
-            st.caption(f"Question {min(agent.state.current_index + 1, len(agent.state.questions))} of {len(agent.state.questions)} • Domain: **{curr_q.competency if curr_q else 'Session Concluded'}**")
-
-            # 1. When all questions are done
-            if agent.state.status == "COMPLETED":
-                st.success("🎉 All interview questions completed! Your scorecard has been submitted for recruiter review.")
-
-                score_data = compute_overall_score(agent.state)
-                record_interview_completion(cand.id, score_data)
-
-                st.markdown(f"""
-                <div class="glass-card">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div>
-                            <h3>Overall Screening Rating: <span style="color:#00F0FF;">{score_data['overall_score']} / 5.0</span></h3>
-                            <p style="color:#94A3B8; margin:0;">Recommendation: <strong style="color:{score_data['rec_color']}">{score_data['recommendation']}</strong></p>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Radar chart
-                st.markdown("#### 🕸️ Competency Benchmark Radar")
-                radar = create_competency_radar_chart(score_data["competency_scores"])
-                st.plotly_chart(radar, use_container_width=True)
-
-                # Candidate Feedback Letter
-                st.markdown("#### ✉️ Candidate Feedback Letter Draft")
-                feedback_letter = generate_candidate_feedback_letter(agent.state, score_data["overall_score"])
-                st.text_area("Official Feedback", value=feedback_letter, height=200)
-
-                down_c1, down_c2 = st.columns(2)
-                with down_c1:
-                    full_md = generate_markdown_report(agent.state)
-                    st.download_button(
-                        label="📄 Download Full Scorecard (.md)",
-                        data=full_md,
-                        file_name=f"Scorecard_{cand.name.replace(' ', '_')}.md",
-                        mime="text/markdown",
-                        use_container_width=True
-                    )
-                with down_c2:
-                    if st.button("⬅️ Return to Admin Portal", use_container_width=True):
-                        st.session_state.portal_view = "Admin Portal"
-                        st.rerun()
-
-            # 2. When an active question is displayed
-            elif curr_q:
-                st.markdown(f"""
-                <div class="question-card">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span class="badge-pill badge-cyan">{curr_q.competency}</span>
-                        <span class="badge-pill badge-purple">Adaptive Level: {agent.state.current_difficulty.upper()}</span>
-                    </div>
-                    <h3 style="margin-top: 14px; color: #FFFFFF;">Question #{curr_q.id}</h3>
-                    <p style="font-size: 1.15rem; line-height: 1.6; color: #F1F5F9;">{curr_q.text}</p>
-                    <div style="background: rgba(0,0,0,0.25); padding: 10px 14px; border-radius: 8px; border-left: 2px solid #00F0FF; margin-top: 12px;">
-                        <small style="color: #94A3B8;">Targeted Resume Claim: <em>"{curr_q.targeted_resume_claim}"</em></small>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Adaptive follow-up probe mode
-                if agent.state.status == "AWAITING_FOLLOWUP":
+                with st.expander(f"📑 {cand['name']} — {cand['job_title']} (Overall Score: {card['overall_score']}/5.0 | {card['recommendation']})", expanded=True):
+                    # Top Score Card Banner
                     st.markdown(f"""
-                    <div class="followup-card">
-                        <span class="badge-pill badge-amber">⚡ Adaptive Agent Follow-up Probe</span>
-                        <h4 style="margin-top: 10px; color: #FCD34D;">Agent Detected Shallow Answer</h4>
-                        <p style="font-size: 1.05rem; color: #F1F5F9;">{agent.state.active_followup}</p>
-                        <small style="color: #CBD5E1;">Please provide specific technical depth, metrics, or trade-offs to address this probe.</small>
+                    <div class="saas-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <span class="status-pill pill-blue">{cand['workflow_status']}</span>
+                                <h2 style="margin: 8px 0 4px 0; color:#FFFFFF;">{cand['name']}</h2>
+                                <p style="margin:0; color:#94A3B8;">Role: <strong>{cand['job_title']}</strong> • Completed: {card['interview_completed_at'] or card['created_at']}</p>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 2.2rem; font-weight: 800; color: #38BDF8;">{card['overall_score']} <span style="font-size:1.2rem; color:#94A3B8;">/ 5.0</span></div>
+                                <div style="font-weight: 700; color: {rec_color}; font-size: 1rem;">AI Recommendation: {card['recommendation']}</div>
+                            </div>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
 
-                    f_ans = st.text_area(
-                        "Candidate Follow-up Response",
-                        value=st.session_state.candidate_followup_input,
-                        height=130,
-                        placeholder="Provide additional architectural details, specific libraries, or trade-offs..."
-                    )
+                    # Human Review Flag Banner
+                    if card["human_review_flag"] == 1:
+                        st.markdown("""
+                        <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 12px 18px; margin-bottom: 16px;">
+                            <strong style="color: #FBBF24;">⚠️ Human Review Required:</strong>
+                            <span style="color: #E2E8F0; font-size: 0.92rem;">
+                                The AI flagged low confidence or variance between resume claims and answer depth. Recruiter verification is required.
+                            </span>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                    cf1, cf2 = st.columns(2)
-                    with cf1:
-                        if st.button("⚡ Quick-Fill Strong Follow-up Answer", use_container_width=True):
-                            st.session_state.candidate_followup_input = SAMPLE_RESPONSES["strong"]["text"]
-                            st.rerun()
-                    with cf2:
-                        if st.button("🚀 Submit Follow-up Answer", type="primary", use_container_width=True):
-                            if f_ans.strip():
-                                agent.submit_answer(f_ans)
-                                st.session_state.candidate_followup_input = ""
-                                st.rerun()
-
-                else:
-                    c_ans = st.text_area(
-                        "Your Answer",
-                        value=st.session_state.candidate_answer_input,
-                        height=140,
-                        placeholder="Type or paste your technical answer here..."
-                    )
-
-                    st.markdown("**⚡ Live Presentation Controls:**")
-                    b1, b2 = st.columns(2)
-                    with b1:
-                        if st.button("⚠️ Test Shallow Answer (Triggers Follow-up Probe)", use_container_width=True):
-                            st.session_state.candidate_answer_input = SAMPLE_RESPONSES["shallow"]["text"]
-                            st.rerun()
-                    with b2:
-                        if st.button("✅ Test Strong Answer (Advances with Score 5)", use_container_width=True):
-                            st.session_state.candidate_answer_input = SAMPLE_RESPONSES["strong"]["text"]
-                            st.rerun()
+                    # Domain Scores Row
+                    sc1, sc2, sc3, sc4 = st.columns(4)
+                    with sc1:
+                        st.markdown(f'<div class="kpi-box"><div class="kpi-number">{card["technical_score"]}</div><div class="kpi-label">Technical Depth</div></div>', unsafe_allow_html=True)
+                    with sc2:
+                        st.markdown(f'<div class="kpi-box"><div class="kpi-number">{card["problem_solving_score"]}</div><div class="kpi-label">Problem Solving</div></div>', unsafe_allow_html=True)
+                    with sc3:
+                        st.markdown(f'<div class="kpi-box"><div class="kpi-number">{card["communication_score"]}</div><div class="kpi-label">Communication</div></div>', unsafe_allow_html=True)
+                    with sc4:
+                        st.markdown(f'<div class="kpi-box"><div class="kpi-number">{card["job_fit_score"]}</div><div class="kpi-label">Job Fit & Alignment</div></div>', unsafe_allow_html=True)
 
                     st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("📤 Submit Answer to Agent", type="primary", use_container_width=True):
-                        if c_ans.strip():
-                            agent.submit_answer(c_ans)
-                            st.session_state.candidate_answer_input = ""
-                            st.rerun()
 
-        # Right Column: Real-Time Tool Calls & Activity
-        with act_col:
-            st.markdown("### 🧠 Live Agent Activity Panel")
-            st.caption("Real-time Python tool executions & agent decisions:")
+                    # Radar Chart & Transcript
+                    r_col1, r_col2 = st.columns([1, 1])
+                    with r_col1:
+                        st.markdown("#### 🕸️ Competency Benchmark Radar")
+                        scores_dict = {
+                            "Technical Depth": card["technical_score"],
+                            "Problem Solving": card["problem_solving_score"],
+                            "Communication": card["communication_score"],
+                            "Job Fit": card["job_fit_score"]
+                        }
+                        radar_fig = create_competency_radar_chart(scores_dict)
+                        st.plotly_chart(radar_fig, use_container_width=True)
 
-            logs = get_activity_logs()
-            if not logs:
-                st.info("No tool calls recorded yet. Submit an answer to view real-time agent tool invocations.")
-            else:
-                for log in reversed(logs[-8:]):
-                    st.markdown(f"""
-                    <div class="activity-item">
-                        <div style="display:flex; justify-content:space-between; color:#94A3B8; font-size:0.75rem;">
-                            <span>⚙️ <strong>{log.tool_name}()</strong></span>
-                            <span>{log.timestamp} ({log.execution_ms}ms)</span>
-                        </div>
-                        <div style="color: #00F0FF; font-weight:600; margin: 4px 0;">{log.result_summary}</div>
-                        <div style="color: #CBD5E1; font-size: 0.8rem;"><em>Reasoning:</em> {log.agent_reasoning}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    with r_col2:
+                        st.markdown("#### 📝 AI Executive Evaluation Summary")
+                        st.markdown(f"**Assessment Rationale:** {card['transcript_summary']}")
+                        st.markdown(f"**Identified Strengths:** {card['strengths']}")
+                        st.markdown(f"**Identified Growth Areas:** {card['gaps']}")
+
+                    # Question by Question Turn Viewer
+                    st.markdown("#### 🔍 Verbatim Turn-by-Turn Evidence")
+                    turns = get_qa_turns_by_session_id(card["session_id"])
+                    for t in turns:
+                        with st.expander(f"Q#{t['question_id']}: {t['competency']} (Score: {t['score']}/5)", expanded=False):
+                            st.markdown(f"**Question:** {t['question_text']}")
+                            st.markdown(f"**Candidate Answer:** *\"{t['candidate_answer']}\"*")
+                            if t['followup_question']:
+                                st.markdown(f"**⚡ Follow-up Probe:** *{t['followup_question']}*")
+                                st.markdown(f"**Follow-up Response:** *\"{t['followup_answer']}\"*")
+                            st.markdown(f"**Verbatim Evidence Quote:** <span style='color:#38BDF8;'>{t['evidence_quote']}</span>", unsafe_allow_html=True)
+                            st.markdown(f"**Rubric Assessment:** `{t['rubric_match']}`")
+
+                    # Consistency Matrix
+                    st.markdown("#### 📑 Resume Claim Verification Findings")
+                    findings = card["consistency_findings"]
+                    if findings:
+                        f_table = []
+                        for f in findings:
+                            status_str = "✅ Supported" if f["status"] == "Supported" else ("⚠️ Needs Clarification" if f["status"] == "Needs Clarification" else "ℹ️ Partially Supported")
+                            f_table.append({
+                                "Claim ID": f["claim_id"],
+                                "Resume Claim Statement": f["claim_text"],
+                                "Verification Status": status_str,
+                                "Analysis & Interview Grounding": f["analysis"]
+                            })
+                        st.dataframe(f_table, use_container_width=True)
+
+                    st.markdown("---")
+
+                    # Step 8 Actions: Approve for Second Round or Place on Hold
+                    st.markdown("#### ⚖️ Human Recruiter Decision & Advancement")
+                    d_col1, d_col2 = st.columns(2)
+
+                    with d_col1:
+                        if cand["workflow_status"] != "SECOND_ROUND_APPROVED":
+                            if st.button(f"🎉 Approve for Second Round ({cand['name']})", key=f"round2_{cand['id']}", type="primary", use_container_width=True):
+                                with st.spinner("Authorizing second round and dispatching notification email..."):
+                                    r2_res = approve_for_second_round(cand["id"], reviewer="Admin")
+                                    st.session_state.toast_msg = f"Approved {cand['name']} for Second Round! Selection email dispatched to {cand['email']}."
+                                    st.rerun()
+                        else:
+                            st.success("✅ Candidate Approved for Second Round. Notification email has been dispatched.")
+
+                    with d_col2:
+                        if cand["workflow_status"] != "ON_HOLD":
+                            if st.button(f"⏸️ Place on Hold ({cand['name']})", key=f"hold_{cand['id']}", use_container_width=True):
+                                place_candidate_on_hold(cand["id"], reviewer="Admin")
+                                st.session_state.toast_msg = f"Candidate {cand['name']} placed on hold."
+                                st.rerun()
+                        else:
+                            st.warning("Candidate is currently on hold.")
+
+    # ------------------------------------------------------------------------
+    # TAB 4: EMAIL DELIVERY & ACTIVITY LOG (STEP 3 & STEP 8 TRACKING)
+    # ------------------------------------------------------------------------
+    with tab_email_activity:
+        st.markdown("### 📨 Email Notification Audit Trail")
+        st.caption("Verifiable email delivery status, provider message references, and retry operations:")
+
+        email_logs = get_all_email_logs()
+
+        if not email_logs:
+            st.info("No email notifications logged yet.")
+        else:
+            for el in email_logs:
+                badge = "pill-emerald" if el["delivery_status"] in ("DELIVERED_SMTP", "ACCEPTED_DEV_MOCK") else "pill-red"
+                with st.expander(f"✉️ {el['subject']} ➔ {el['recipient_email']} [{el['delivery_status']}]", expanded=False):
+                    em1, em2 = st.columns([1.2, 1])
+                    with em1:
+                        st.markdown(f"**Recipient:** `{el['recipient_name']} <{el['recipient_email']}>`")
+                        st.markdown(f"**Notification Type:** `{el['notification_type']}`")
+                        st.markdown(f"**Delivery Status:** <span class='status-pill {badge}'>{el['delivery_status']}</span>", unsafe_allow_html=True)
+                        st.markdown(f"**Provider Reference:** `{el['provider_reference']}`")
+                        if el.get("error_details"):
+                            st.error(f"Error: {el['error_details']}")
+                        st.markdown(f"**Sent At:** `{el['sent_at'] or el['created_at']}`")
+
+                        if el["delivery_status"] == "FAILED":
+                            if st.button(f"🔄 Retry Dispatch ({el['id']})", key=f"retry_{el['id']}"):
+                                retry_failed_notification(el["id"])
+                                st.session_state.toast_msg = "Retried email notification."
+                                st.rerun()
+
+                    with em2:
+                        st.markdown("**Rendered Body:**")
+                        st.components.v1.html(el["body_html"], height=260, scrolling=True)

@@ -96,10 +96,12 @@ class InterviewPilotAgent:
         rag_claims = search_resume_claims(resume, ["rag", "fastapi", "latency", "vector", "python"])
         k8s_claims = search_resume_claims(resume, ["kubernetes", "docker", "cluster", "aws", "scale"])
         db_claims = search_resume_claims(resume, ["redis", "postgres", "database", "caching", "sql"])
+        async_claims = search_resume_claims(resume, ["asyncio", "concurrency", "thread", "worker", "microservices"])
 
         q1_claim = rag_claims[0].text if rag_claims else "Built Python microservices and API integrations."
         q2_claim = k8s_claims[0].text if k8s_claims else "Managed containerized deployments and scaling."
         q3_claim = db_claims[0].text if db_claims else "Implemented database indexing and caching strategies."
+        q4_claim = async_claims[0].text if async_claims else "Optimized asynchronous I/O and concurrency."
 
         questions: List[Question] = [
             Question(
@@ -131,6 +133,24 @@ class InterviewPilotAgent:
             ),
             Question(
                 id=4,
+                competency="Technical Depth",
+                text=f"Regarding asynchronous Python: When building high-concurrency microservices, what are the subtle performance pitfalls of mixing blocking CPU-bound code inside an asyncio event loop, and how do you architect thread/process pools to avoid starving the loop?",
+                targeted_resume_claim=q4_claim,
+                jd_requirement="Deep understanding of asynchronous event loops, concurrency, and thread execution.",
+                difficulty="standard",
+                evaluation_criteria="Asyncio internals, loop.run_in_executor, ProcessPoolExecutor, GIL implications, and non-blocking I/O."
+            ),
+            Question(
+                id=5,
+                competency="Problem Solving & Scenarios",
+                text="Imagine a production PostgreSQL database where write queries are deadlocking under burst traffic and connection pool limits are being exhausted. How would you analyze pg_stat_activity, configure PgBouncer pooling, and restructure transaction boundaries?",
+                targeted_resume_claim="PostgreSQL optimization and connection pool management.",
+                jd_requirement="Production database reliability and connection pool tuning.",
+                difficulty="standard",
+                evaluation_criteria="Transaction isolation levels, index locking, PgBouncer transaction pooling vs session pooling, and query plan analysis (EXPLAIN ANALYZE)."
+            ),
+            Question(
+                id=6,
                 competency="Behavioral & Ownership",
                 text="Tell me about a high-stakes technical disagreement you had with a team member or product lead regarding architectural trade-offs or release timelines. How did you advocate your perspective, test assumptions, and what was the ultimate resolution?",
                 targeted_resume_claim="Mentorship, cross-functional collaboration, and code reviews.",
@@ -139,13 +159,40 @@ class InterviewPilotAgent:
                 evaluation_criteria="STAR framework, objective data/benchmarks over ego, empathy, and business impact."
             ),
             Question(
-                id=5,
+                id=7,
+                competency="Behavioral & Ownership",
+                text="Walk me through a situation where a code deployment or configuration error you were responsible for caused a production degradation. How did you take ownership during the incident, communicate with stakeholders, and what systemic safeguards did you introduce post-mortem?",
+                targeted_resume_claim="Production ownership and engineering rigor.",
+                jd_requirement="Extreme ownership, incident command, and blameless post-mortem culture.",
+                difficulty="standard",
+                evaluation_criteria="Transparency, rapid mitigation over fault-finding, root-cause depth, and automated preventative controls."
+            ),
+            Question(
+                id=8,
                 competency="Communication & Clarity",
                 text="How would you explain the fundamental trade-offs between asynchronous event-driven architecture (e.g., message queues) versus synchronous REST APIs to a non-technical product manager who wants real-time updates?",
                 targeted_resume_claim="Clean architectural communication and team collaboration.",
                 jd_requirement="Clear stakeholder communication and ability to articulate architectural trade-offs.",
                 difficulty="standard",
                 evaluation_criteria="Simplicity of metaphors, clarity of latency vs complexity trade-offs, and structured delivery."
+            ),
+            Question(
+                id=9,
+                competency="System Design & Scalability",
+                text="When designing distributed microservices with external dependencies, how do you implement circuit breakers, retry budgets with exponential backoff, and bulkhead isolation to prevent cascading failures across the platform?",
+                targeted_resume_claim="Distributed architecture and fault tolerance.",
+                jd_requirement="Resilient microservice design, graceful degradation, and chaos engineering.",
+                difficulty="standard",
+                evaluation_criteria="Circuit breaker state machines (Open/Half-Open/Closed), jittered backoff, and rate limiting."
+            ),
+            Question(
+                id=10,
+                competency="Communication & Clarity",
+                text="To wrap up: Based on your review of this role's requirements, what is one technical area where you feel your background provides immediate outsized value, and what is one domain you are most eager to ramp up on?",
+                targeted_resume_claim="Job description alignment and career motivation.",
+                jd_requirement="Self-awareness, growth mindset, and role alignment.",
+                difficulty="standard",
+                evaluation_criteria="Humility, precise alignment with JD requirements, and genuine continuous learning orientation."
             )
         ]
 
@@ -159,8 +206,8 @@ class InterviewPilotAgent:
         record_tool_call(
             tool_name="plan_interview",
             arguments={"candidate": resume.candidate_name, "questions_count": len(questions)},
-            result_summary=f"Synthesized {len(questions)} resume-anchored questions mapped across 5 core competencies.",
-            reasoning="Constructed interview agenda linking candidate resume claims directly to required JD competencies."
+            result_summary=f"Synthesized {len(questions)} resume-anchored questions covering technical depth, scenarios, behavioral, and communication domains.",
+            reasoning="Constructed comprehensive 8-10 question agenda linking candidate resume claims directly to required JD competencies."
         )
 
         return questions

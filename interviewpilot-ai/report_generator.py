@@ -45,28 +45,44 @@ def compute_overall_score(state: InterviewState) -> Dict[str, Any]:
     # Check for consistency flags
     clarification_flags = sum(1 for f in state.consistency_findings if f.status == "Needs Clarification")
 
-    # Recruiter recommendation logic
-    if clarification_flags >= 2 or any(score <= 1.5 for score in comp_scores.values()):
-        recommendation = "NEEDS HUMAN REVIEW"
-        rec_color = "#FFB020"  # Amber/Yellow
-        rec_desc = "Significant variance between resume claims and interview depth, or low core competency score. Recruiter should conduct manual review."
-    elif overall >= 3.8 and all(score >= 3.0 for score in comp_scores.values()):
-        recommendation = "ADVANCE TO TECHNICAL ROUND"
-        rec_color = "#00F0FF"  # Cyan/Green
-        rec_desc = "Strong demonstration of technical depth, structured problem solving, and production architecture awareness."
-    elif overall >= 3.0:
-        recommendation = "HOLD / BORDERLINE"
-        rec_color = "#A855F7"  # Purple
-        rec_desc = "Solid foundational capabilities with moderate technical depth. Recommend targeted follow-up probing in Round 2."
+    # Core 4 Domain aggregations
+    tech_scores = [float(t.final_score) for t in state.history if t.competency in ("Technical Depth", "System Design & Scalability")]
+    prob_scores = [float(t.final_score) for t in state.history if t.competency == "Problem Solving & Scenarios"]
+    comm_scores = [float(t.final_score) for t in state.history if t.competency == "Communication & Clarity"]
+    job_scores = [float(t.final_score) for t in state.history if t.competency in ("Behavioral & Ownership", "Communication & Clarity")]
+
+    tech_avg = round(sum(tech_scores) / max(1, len(tech_scores)), 2) if tech_scores else 3.5
+    prob_avg = round(sum(prob_scores) / max(1, len(prob_scores)), 2) if prob_scores else 3.5
+    comm_avg = round(sum(comm_scores) / max(1, len(comm_scores)), 2) if comm_scores else 4.0
+    job_avg = round(sum(job_scores) / max(1, len(job_scores)), 2) if job_scores else 3.8
+
+    # Recruiter recommendation logic: ADVANCE, HOLD, REJECT
+    human_review_flag = False
+    if clarification_flags >= 2 or any(float(t.final_score) <= 2.0 for t in state.history) or overall < 3.0:
+        human_review_flag = True
+
+    if overall >= 3.8 and not human_review_flag:
+        recommendation = "ADVANCE"
+        rec_color = "#10B981"  # Emerald Green
+        rec_desc = "Strong candidate demonstrating technical depth, structured troubleshooting, and clean communication. Recommended to advance to Round 2."
+    elif overall >= 2.8:
+        recommendation = "HOLD"
+        rec_color = "#F59E0B"  # Amber
+        rec_desc = "Solid foundational profile with moderate depth. Recommend placing on hold pending peer comparisons or targeted follow-up."
     else:
-        recommendation = "NEEDS HUMAN REVIEW (BELOW BENCHMARK)"
+        recommendation = "REJECT"
         rec_color = "#EF4444"  # Red
-        rec_desc = "Scores fall below standard benchmark for senior profile. Requires human recruiter review before final decision."
+        rec_desc = "Performance falls significantly below role requirements. Flagged for human review before final decision."
 
     return {
         "overall_score": overall,
+        "technical_score": tech_avg,
+        "problem_solving_score": prob_avg,
+        "communication_score": comm_avg,
+        "job_fit_score": job_avg,
         "competency_scores": comp_scores,
         "recommendation": recommendation,
+        "human_review_flag": 1 if human_review_flag else 0,
         "rec_color": rec_color,
         "rec_desc": rec_desc,
         "clarification_flags": clarification_flags

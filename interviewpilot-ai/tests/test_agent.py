@@ -42,14 +42,14 @@ def test_agent_planning():
     resume = parse_resume(SYNTHETIC_RESUME_TEXT)
     questions = agent.plan_interview(resume, SYNTHETIC_JD_TEXT)
 
-    assert len(questions) == 5, f"Expected 5 questions, got {len(questions)}"
+    assert 8 <= len(questions) <= 10, f"Expected 8-10 questions, got {len(questions)}"
     assert questions[0].competency == "Technical Depth"
     assert questions[0].targeted_resume_claim is not None
     assert agent.state.status == "IN_PROGRESS"
 
     logs = get_activity_logs()
     assert any(l.tool_name == "plan_interview" for l in logs), "plan_interview tool call not logged"
-    print("✓ Successfully planned 5 resume-anchored interview questions.")
+    print(f"✓ Successfully planned {len(questions)} resume-anchored interview questions.")
 
 
 def test_shallow_answer_triggers_followup():
@@ -98,32 +98,39 @@ def test_followup_resolution_and_advancement():
 
 
 def test_full_interview_simulation_and_report():
-    print("\nTesting Full 5-Question Interview Flow & Final Report...")
+    print("\nTesting Full 10-Question Interview Flow & Final Report...")
     clear_activity_logs()
     agent = InterviewPilotAgent()
     resume = parse_resume(SYNTHETIC_RESUME_TEXT)
-    agent.plan_interview(resume, SYNTHETIC_JD_TEXT)
+    questions = agent.plan_interview(resume, SYNTHETIC_JD_TEXT)
+    total_q = len(questions)
 
     answers = [
         SAMPLE_RESPONSES["strong"]["text"],
         SAMPLE_RESPONSES["scenario_strong"]["text"],
         "We used Redis cluster with hash tags and read replicas in Postgres. We managed stampedes using Redlock and stale cache invalidation.",
+        "In asynchronous Python, we prevent event loop blocking by dispatching CPU intensive tasks to ProcessPoolExecutor and blocking network libraries to loop.run_in_executor.",
+        "We analyze pg_stat_activity for lock waits, set 5s timeouts, configure PgBouncer connection pooling, and add composite indexes.",
         "In our previous project, a teammate pushed to deploy without automated migrations. I advocated for rollback using telemetry data, then paired with them to build an automated migration pipeline.",
-        "I explain message queues as an order ticket system at a busy restaurant kitchen: instead of a customer standing at the counter waiting for the chef to cook, they receive a ticket number and get notified when ready."
+        "I was on-call during a misconfiguration incident. I immediately initiated canary rollback, communicated with customer teams, and automated configuration validation in our CI/CD pipeline.",
+        "I explain message queues as an order ticket system at a busy restaurant kitchen: instead of a customer standing at the counter waiting for the chef to cook, they receive a ticket number and get notified when ready.",
+        "We implement circuit breakers with Closed, Open, and Half-Open states, combined with exponential backoff and jittered retry budgets to prevent cascading outages.",
+        "My background in high-throughput Python and caching directly aligns with your low-latency requirements, and I am excited to deepen my work with your multi-region Kubernetes infrastructure."
     ]
 
-    for i, ans in enumerate(answers):
+    for i in range(total_q):
+        ans = answers[i] if i < len(answers) else "We ensure robust distributed systems design with metrics, telemetry, and automated unit testing."
         res = agent.submit_answer(ans)
         if res.get("status") == "followup_required":
             res = agent.submit_answer("Elaborating with specific distributed lock metrics and error budgets.")
 
     assert agent.state.status == "COMPLETED", f"Expected COMPLETED, got {agent.state.status}"
-    assert len(agent.state.history) == 5, f"Expected 5 turns, got {len(agent.state.history)}"
+    assert len(agent.state.history) == total_q, f"Expected {total_q} turns, got {len(agent.state.history)}"
 
     # Verify score computation
     metrics = compute_overall_score(agent.state)
     assert 1.0 <= metrics["overall_score"] <= 5.0
-    assert metrics["recommendation"] in ["ADVANCE TO TECHNICAL ROUND", "HOLD / BORDERLINE", "NEEDS HUMAN REVIEW"]
+    assert metrics["recommendation"] in ["ADVANCE", "HOLD", "REJECT"]
     assert len(agent.state.consistency_findings) > 0
 
     # Verify Markdown report generation
@@ -131,7 +138,7 @@ def test_full_interview_simulation_and_report():
     assert "Candidate Evaluation Scorecard" in report_md
     assert "Alex Chen" in report_md
     assert "Human Oversight Safeguard Notice" in report_md
-    print(f"✓ Full interview completed. Overall score: {metrics['overall_score']}/5.0 | Rec: {metrics['recommendation']}")
+    print(f"✓ Full 10-question interview completed. Overall score: {metrics['overall_score']}/5.0 | Rec: {metrics['recommendation']}")
 
 
 def test_reset_functionality():
@@ -151,70 +158,64 @@ def test_reset_functionality():
 
 def test_admin_pipeline_and_roles():
     print("\nTesting Admin Talent Pipeline & Role Buckets...")
-    from pipeline_manager import get_all_roles, get_candidates, get_candidate_by_id
+    from database import get_all_jobs, get_candidates_list, get_candidate_details
 
-    roles = get_all_roles()
-    assert len(roles) >= 5, f"Expected at least 5 roles, found {len(roles)}"
-    assert "Software Engineer" in roles
-    assert "DevOps Engineer" in roles
-    assert "AI/ML Engineer" in roles
+    jobs = get_all_jobs()
+    job_titles = [j["title"] for j in jobs]
+    assert len(jobs) >= 5, f"Expected at least 5 roles, found {len(jobs)}"
+    assert any("Software Engineer" in t for t in job_titles)
+    assert any("DevOps" in t for t in job_titles)
+    assert any("AI" in t for t in job_titles)
 
     # Verify candidates are bucketed
-    all_cands = get_candidates()
+    all_cands = get_candidates_list()
     assert len(all_cands) >= 5, "Expected at least 5 candidates"
 
     # Verify Sukrit exists under Software Engineer
-    sukrit = get_candidate_by_id("CAND-SE-8109")
+    sukrit = get_candidate_details("CAND-SE-8109")
     assert sukrit is not None
-    assert sukrit.name == "Sukrit Sharma"
-    assert sukrit.email == "sukrit.ss.31@gmail.com"
-    assert sukrit.role == "Software Engineer"
-    assert sukrit.match_score >= 90
+    assert sukrit["name"] == "Sukrit Sharma"
+    assert sukrit["email"] == "sukrit.ss.31@gmail.com"
+    assert "Software Engineer" in sukrit["job_title"]
     print(f"✓ Verified 5 Role Buckets and Sukrit Sharma profile under Software Engineer.")
 
 
 def test_approval_and_email_dispatch():
     print("\nTesting Candidate Approval & Email Dispatch...")
-    from pipeline_manager import approve_candidate, get_candidate_by_id
-    from notification_service import get_dispatch_logs
+    from pipeline_manager import approve_for_first_round
+    from database import get_candidate_details, get_all_email_logs
 
-    res = approve_candidate("CAND-SE-8109")
+    res = approve_for_first_round("CAND-SE-8109")
     assert res["status"] == "success"
-    assert res["access_id"] == "CAND-SE-8109"
-    assert res["access_code"].startswith("PILOT-")
+    assert res["token"] is not None
 
-    cand = get_candidate_by_id("CAND-SE-8109")
-    assert cand.status == "Approved (Invitation Sent)"
-    assert cand.access_code is not None
+    cand = get_candidate_details("CAND-SE-8109")
+    assert cand["workflow_status"] in ("INVITED", "FIRST_ROUND_APPROVED")
 
-    logs = get_dispatch_logs()
-    assert len(logs) > 0
-    latest_log = logs[-1]
+    logs = get_all_email_logs()
+    cand_logs = [l for l in logs if l.get("candidate_id") == "CAND-SE-8109"]
+    assert len(cand_logs) > 0
+    latest_log = cand_logs[0]
     assert latest_log["recipient_email"] == "sukrit.ss.31@gmail.com"
-    assert latest_log["access_id"] == "CAND-SE-8109"
-    assert latest_log["access_code"] == cand.access_code
-    print(f"✓ Approved Sukrit Sharma; generated {cand.access_id} and {cand.access_code}; email dispatched to {latest_log['recipient_email']}.")
+    print(f"✓ Approved Sukrit Sharma; generated token {res['token'][:10]}...; email dispatched to {latest_log['recipient_email']}.")
 
 
 def test_candidate_authentication_gateway():
-    print("\nTesting Candidate Authentication Gateway...")
-    from pipeline_manager import authenticate_candidate, get_candidate_by_id
+    print("\nTesting Candidate Token Validation Gateway...")
+    from pipeline_manager import validate_candidate_interview_token
+    from database import get_candidate_details
+    cand = get_candidate_details("CAND-SE-8109")
+    assert cand["token"] is not None
 
-    cand = get_candidate_by_id("CAND-SE-8109")
-    # Valid login with ID and passcode
-    auth_success = authenticate_candidate(cand.id, cand.access_code)
-    assert auth_success is not None
-    assert auth_success.name == "Sukrit Sharma"
+    # Valid token lookup
+    val_res = validate_candidate_interview_token(cand["token"])
+    assert val_res["valid"] is True
+    assert val_res["session"]["candidate_name"] == "Sukrit Sharma"
 
-    # Valid login with Gmail address and passcode
-    auth_email = authenticate_candidate("sukrit.ss.31@gmail.com", cand.access_code)
-    assert auth_email is not None
-    assert auth_email.name == "Sukrit Sharma"
-
-    # Invalid passcode rejection
-    auth_fail = authenticate_candidate("CAND-SE-8109", "WRONG-PASS")
-    assert auth_fail is None
-    print(f"✓ Authentication Gateway verified: correctly authenticates with ID/Gmail and rejects invalid codes.")
+    # Invalid token lookup
+    invalid_res = validate_candidate_interview_token("INVALID_TOKEN_123")
+    assert invalid_res["valid"] is False
+    print(f"✓ Candidate Token Gateway verified: securely authenticates valid session token and rejects invalid tokens.")
 
 
 if __name__ == "__main__":
@@ -233,4 +234,5 @@ if __name__ == "__main__":
     print("\n==================================================")
     print("   ALL TESTS PASSED WITH 100% SUCCESS RATE!       ")
     print("==================================================")
+
 
