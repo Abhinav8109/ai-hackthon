@@ -566,6 +566,7 @@ if st.session_state.active_portal == "Candidate Portal":
             </div>
             <div id="timer-status" style="margin-top: 6px; font-size: 0.76rem; color: #64748B; text-align: right;">Standard recommended response: 60 seconds per question</div>
         </div>
+        <!-- timer_idx_{agent.state.current_index}_{agent.state.status} -->
         <script>
             let remaining = 60;
             const valEl = document.getElementById('countdown-val');
@@ -603,7 +604,7 @@ if st.session_state.active_portal == "Candidate Portal":
             }}, 1000);
         </script>
         """
-        st.components.v1.html(timer_html, height=88, key=f"timer_comp_{agent.state.current_index}_{agent.state.status}")
+        st.components.v1.html(timer_html, height=88)
 
         if curr_q:
             st.markdown(f"""
