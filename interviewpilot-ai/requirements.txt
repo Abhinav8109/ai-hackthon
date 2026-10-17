@@ -1,0 +1,7 @@
+# InterviewPilot AI — Core Dependencies
+# Lightweight, beginner-friendly, and 100% locally runnable
+streamlit>=1.35.0
+pypdf>=4.2.0
+plotly>=5.22.0
+pydantic>=2.7.0
+python-dotenv>=1.0.0
