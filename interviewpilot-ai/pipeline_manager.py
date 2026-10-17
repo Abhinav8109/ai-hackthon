@@ -28,6 +28,7 @@ from database import (
     get_scorecard_by_candidate_id,
     get_qa_turns_by_session_id,
     log_audit_event,
+    insert_or_replace_candidate,
     seed_database_if_empty
 )
 from email_service import (
@@ -480,3 +481,162 @@ def retry_candidate_invitation_email(candidate_id: str) -> Dict[str, Any]:
         conn.commit()
 
     return dispatch_res
+
+
+# Domain keywords taxonomy for role matching
+ROLE_DOMAIN_KEYWORDS = {
+    "JOB-SE-01": [
+        "python", "fastapi", "redis", "postgresql", "postgres", "microservice", "microservices",
+        "asyncio", "rest", "api", "database", "latency", "throughput", "caching", "sql", "backend"
+    ],
+    "JOB-DE-02": [
+        "kubernetes", "k8s", "aws", "terraform", "devops", "sre", "ci/cd", "prometheus", "helm",
+        "docker", "infrastructure", "grafana", "observability", "deploy", "cluster", "cloud"
+    ],
+    "JOB-AI-03": [
+        "pytorch", "langchain", "rag", "vector", "chromadb", "ai", "ml", "llm", "llms",
+        "machine learning", "embeddings", "hallucination", "deep learning", "nlp", "inference"
+    ],
+    "JOB-FE-04": [
+        "react", "typescript", "next.js", "redux", "tailwind", "tailwindcss", "web vitals",
+        "frontend", "ui", "ux", "css", "html", "javascript", "dom", "responsive"
+    ],
+    "JOB-CD-05": [
+        "kafka", "spark", "snowflake", "airflow", "data", "glue", "etl", "lakehouse",
+        "warehouse", "streaming", "batch", "pipeline", "sql", "big data"
+    ]
+}
+
+
+def match_resume_to_profiles(
+    raw_text: str,
+    override_name: Optional[str] = None,
+    override_email: Optional[str] = None,
+    min_threshold: int = 50,
+    save_if_matched: bool = True
+) -> Dict[str, Any]:
+    """
+    Ingests and matches a candidate resume against all 5 open enterprise roles.
+    - If top match >= min_threshold (default 50%):
+        Matches to that profile bucket, saves/shortlists candidate, and enables approval.
+    - If top match < min_threshold:
+        Marks as NOT matching any profile, surfaces role breakdown, and avoids saving.
+    """
+    seed_database_if_empty()
+    if not raw_text or len(raw_text.strip()) < 20:
+        return {
+            "matched": False,
+            "reason": "Resume text is empty or too short to analyze. Please provide a valid resume.",
+            "all_evaluations": []
+        }
+
+    structured = parse_resume(raw_text)
+    lower_text = raw_text.lower()
+
+    # Collect all candidate skill keywords
+    cand_skills = set()
+    for cat_skills in structured.skills.values():
+        for s in cat_skills:
+            cand_skills.add(s.lower())
+
+    jobs = get_all_jobs()
+    evaluations = []
+
+    for job in jobs:
+        req_skills = json.loads(job["skills_required"]) if isinstance(job["skills_required"], str) else job["skills_required"]
+        matched_skills = []
+        for s in req_skills:
+            pattern = r"\b" + re.escape(s.lower()) + r"\b"
+            if s.lower() in cand_skills or re.search(pattern, lower_text):
+                matched_skills.append(s)
+
+        missing_skills = [s for s in req_skills if s not in matched_skills]
+        skill_ratio = len(matched_skills) / max(len(req_skills), 1)
+
+        # Domain terms analysis
+        domain_terms = ROLE_DOMAIN_KEYWORDS.get(job["id"], [])
+        matched_terms = [t for t in domain_terms if re.search(r"\b" + re.escape(t) + r"\b", lower_text)]
+        term_ratio = min(1.0, len(matched_terms) / max(min(len(domain_terms), 6), 1))
+
+        # Experience alignment bonus
+        min_exp = job.get("min_experience", 3)
+        exp_bonus = 0.10 if (structured.years_experience or 0) >= min_exp else 0.0
+
+        if len(matched_skills) == 0 and len(matched_terms) == 0:
+            match_score = 0
+        else:
+            calc_score = (skill_ratio * 65.0) + (term_ratio * 25.0) + (exp_bonus * 100.0)
+            match_score = int(min(98, max(5, round(calc_score))))
+
+        evaluations.append({
+            "job_id": job["id"],
+            "job_title": job["title"],
+            "department": job["department"],
+            "match_score": match_score,
+            "matched_skills": matched_skills,
+            "missing_skills": missing_skills,
+            "matched_terms_count": len(matched_terms)
+        })
+
+    # Sort jobs by match score descending
+    evaluations.sort(key=lambda x: x["match_score"], reverse=True)
+    top_job = evaluations[0]
+
+    candidate_name = override_name.strip() if override_name and override_name.strip() else structured.candidate_name
+    candidate_email = override_email.strip() if override_email and override_email.strip() else (
+        structured.email or f"{candidate_name.lower().replace(' ', '.')}@applicant.com"
+    )
+
+    if top_job["match_score"] >= min_threshold:
+        # Generate summary
+        if structured.claims:
+            summary = "; ".join([c.text for c in structured.claims[:2]])
+        else:
+            summary = f"Candidate with {structured.years_experience} years experience matching {top_job['job_title']} with {len(top_job['matched_skills'])} verified core skills."
+
+        cand_id = f"CAND-UP-{secrets.token_hex(3).upper()}"
+        saved_id = cand_id
+
+        if save_if_matched:
+            save_res = insert_or_replace_candidate(
+                candidate_id=cand_id,
+                job_id=top_job["job_id"],
+                name=candidate_name,
+                email=candidate_email,
+                department=top_job["department"],
+                experience_years=structured.years_experience or 3,
+                match_score=top_job["match_score"],
+                skills=top_job["matched_skills"] if top_job["matched_skills"] else ["Python"],
+                resume_summary=summary,
+                resume_text=raw_text,
+                shortlist_status="SHORTLISTED",
+                workflow_status="SHORTLISTED"
+            )
+            saved_id = save_res["id"]
+
+        return {
+            "matched": True,
+            "candidate_id": saved_id,
+            "candidate_name": candidate_name,
+            "candidate_email": candidate_email,
+            "matched_job": top_job,
+            "match_score": top_job["match_score"],
+            "matched_skills": top_job["matched_skills"],
+            "missing_skills": top_job["missing_skills"],
+            "experience_years": structured.years_experience or 3,
+            "summary": summary,
+            "resume_text": raw_text,
+            "all_evaluations": evaluations
+        }
+    else:
+        return {
+            "matched": False,
+            "candidate_name": candidate_name,
+            "candidate_email": candidate_email,
+            "best_job": top_job,
+            "best_score": top_job["match_score"],
+            "reason": f"The uploaded resume does not match any open profile. Best alignment was '{top_job['job_title']}' with only {top_job['match_score']}% relevance, which is below the minimum qualification threshold of {min_threshold}%.",
+            "all_evaluations": evaluations,
+            "resume_text": raw_text
+        }
+

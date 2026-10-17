@@ -523,3 +523,56 @@ def log_audit_event(entity_type: str, entity_id: str, action: str, actor: str, d
             (entity_type, entity_id, action, actor, details, now)
         )
         conn.commit()
+
+
+def insert_or_replace_candidate(
+    candidate_id: str,
+    job_id: str,
+    name: str,
+    email: str,
+    department: str,
+    experience_years: int,
+    match_score: int,
+    skills: List[str],
+    resume_summary: str,
+    resume_text: str,
+    shortlist_status: str = "SHORTLISTED",
+    workflow_status: str = "SHORTLISTED"
+) -> Dict[str, Any]:
+    """Inserts a new candidate profile or updates an existing one by email."""
+    now = datetime.now(timezone.utc).isoformat()
+    skills_json = json.dumps(skills) if isinstance(skills, list) else skills
+    with get_db_connection() as conn:
+        existing = conn.execute("SELECT id FROM candidates WHERE email = ?;", (email.strip(),)).fetchone()
+        if existing:
+            actual_id = existing[0]
+            conn.execute("""
+            UPDATE candidates SET
+                job_id = ?, name = ?, department = ?, experience_years = ?,
+                match_score = ?, skills = ?, resume_summary = ?, resume_text = ?,
+                shortlist_status = ?, workflow_status = ?, updated_at = ?
+            WHERE id = ?;
+            """, (
+                job_id, name, department, experience_years,
+                match_score, skills_json, resume_summary, resume_text,
+                shortlist_status, workflow_status, now, actual_id
+            ))
+            conn.commit()
+            log_audit_event("candidate", actual_id, "UPDATED_RESUME", "Admin", f"Updated resume for {name} ({email})")
+            return {"id": actual_id, "action": "updated"}
+        else:
+            conn.execute("""
+            INSERT INTO candidates (
+                id, job_id, name, email, department, experience_years,
+                match_score, skills, resume_summary, resume_text,
+                shortlist_status, workflow_status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (
+                candidate_id, job_id, name, email.strip(), department, experience_years,
+                match_score, skills_json, resume_summary, resume_text,
+                shortlist_status, workflow_status, now, now
+            ))
+            conn.commit()
+            log_audit_event("candidate", candidate_id, "CREATED_SHORTLISTED", "Admin", f"Ingested and shortlisted {name} ({email}) under {job_id}")
+            return {"id": candidate_id, "action": "created"}
+

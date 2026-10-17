@@ -272,5 +272,69 @@ def run_full_recruitment_workflow_test():
     print("=================================================================")
 
 
+def test_resume_upload_and_profile_matching():
+    print("\n=================================================================")
+    print("   RUNNING RESUME UPLOAD, AUTO-MATCHING & REJECTION TEST SUITE  ")
+    print("=================================================================")
+    from pipeline_manager import match_resume_to_profiles, approve_for_first_round, validate_candidate_interview_token
+    from demo_data import SAMPLE_DEVOPS_RESUME, SAMPLE_AI_RESUME, SAMPLE_NONMATCHING_CHEF_RESUME
+    from database import get_candidate_details
+
+    # Test 1: DevOps Resume Upload -> Correct Profile Matching
+    print("\n[Upload Test 1] Uploading and analyzing DevOps Engineer Resume...")
+    res_devops = match_resume_to_profiles(SAMPLE_DEVOPS_RESUME, override_name="David Ross", override_email="david.ross.devops@example.com")
+    assert res_devops["matched"] is True, "DevOps resume should have matched an open role."
+    assert "DevOps" in res_devops["matched_job"]["job_title"], f"Expected DevOps role, got {res_devops['matched_job']['job_title']}"
+    assert res_devops["match_score"] >= 80, f"Expected match score >= 80, got {res_devops['match_score']}"
+    assert len(res_devops["matched_skills"]) >= 4
+    print(f"✓ Matched to '{res_devops['matched_job']['job_title']}' with {res_devops['match_score']}% score.")
+
+    # Verify candidate is saved in DB and resume is downloadable
+    db_cand = get_candidate_details(res_devops["candidate_id"])
+    assert db_cand is not None
+    assert db_cand["name"] == "David Ross"
+    assert db_cand["workflow_status"] == "SHORTLISTED"
+    assert len(db_cand["resume_text"]) > 200, "Resume text must be persisted for downloading."
+    print("✓ Candidate profile successfully bucketed into Lead DevOps role; resume text ready for download.")
+
+    # Test 2: AI Systems Resume Upload -> Correct Profile Matching
+    print("\n[Upload Test 2] Uploading and analyzing AI/ML Systems Engineer Resume...")
+    res_ai = match_resume_to_profiles(SAMPLE_AI_RESUME, override_name="Anita Roy", override_email="anita.roy.ai@example.com")
+    assert res_ai["matched"] is True, "AI resume should match AI Systems role."
+    assert "AI" in res_ai["matched_job"]["job_title"], f"Expected AI role, got {res_ai['matched_job']['job_title']}"
+    assert res_ai["match_score"] >= 80
+    print(f"✓ Matched to '{res_ai['matched_job']['job_title']}' with {res_ai['match_score']}% score.")
+
+    # Test 3: Non-Matching Resume -> Correct Rejection & Profile Mismatch Flag
+    print("\n[Upload Test 3] Uploading Non-Matching Resume (Executive Chef)...")
+    res_chef = match_resume_to_profiles(SAMPLE_NONMATCHING_CHEF_RESUME, override_name="Chef Marco Pierre", override_email="marco.pierre@culinaryart.com")
+    assert res_chef["matched"] is False, "Culinary resume should NOT match any technical role."
+    assert res_chef["best_score"] < 50, f"Expected non-matching score < 50%, got {res_chef['best_score']}%"
+    assert "does not match any open profile" in res_chef["reason"]
+    assert len(res_chef["all_evaluations"]) == 5, "Should evaluate fit across all 5 open roles."
+    print(f"✓ Correctly rejected non-matching resume: '{res_chef['reason']}'")
+
+    # Test 4: Approval & Link Generation for Uploaded Candidate
+    print("\n[Upload Test 4] Admin approves uploaded candidate (David Ross) for interview...")
+    app_res = approve_for_first_round(res_devops["candidate_id"])
+    assert app_res["status"] == "success"
+    assert "http://localhost:8501/?token=" in app_res["interview_url"]
+    print(f"✓ Generated interview link: {app_res['interview_url']}")
+
+    # Test 5: Candidate Accesses Screening Room via Generated Link
+    print("\n[Upload Test 5] Candidate accesses interview portal with new link...")
+    cand_val = validate_candidate_interview_token(app_res["token"])
+    assert cand_val["valid"] is True
+    assert cand_val["session"]["candidate_name"] == "David Ross"
+    assert len(cand_val["session"]["plan_questions"]) >= 8
+    print(f"✓ Candidate portal validated token for {cand_val['session']['candidate_name']} ({cand_val['session']['job_title']}) with {len(cand_val['session']['plan_questions'])} tailored questions.")
+
+    print("\n=================================================================")
+    print("   ALL RESUME UPLOAD & MATCHING ACCEPTANCE CRITERIA PASSED!      ")
+    print("=================================================================")
+
+
 if __name__ == "__main__":
     run_full_recruitment_workflow_test()
+    test_resume_upload_and_profile_matching()
+

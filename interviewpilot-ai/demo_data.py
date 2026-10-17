@@ -80,3 +80,48 @@ SAMPLE_RESPONSES = {
         "label": "✅ Test Strong Troubleshooting"
     }
 }
+
+
+# Pre-crafted sample resumes for instant live demonstration of matching & non-matching
+SAMPLE_DEVOPS_RESUME = """David Ross
+Email: david.ross.devops@example.com | Phone: (555) 345-9876
+Location: Austin, TX | LinkedIn: linkedin.com/in/david-ross-sre
+
+PROFESSIONAL SUMMARY
+Senior DevOps and Site Reliability Engineer with 6+ years orchestrating mission-critical cloud infrastructure on AWS.
+• Architected multi-region Kubernetes (EKS) clusters handling 40,000 requests/second with 99.99% availability.
+• Engineered zero-downtime CI/CD deployment pipelines using GitHub Actions, Helm charts, and Terraform.
+• Implemented Prometheus and Grafana alerting stacks, reducing Mean Time to Detection (MTTD) by 60%.
+• Automated infrastructure as code with Terraform and Docker containerization.
+
+SKILLS
+Kubernetes, AWS, Terraform, Docker, CI/CD, Prometheus, Helm, Python, Linux, Bash"""
+
+
+SAMPLE_AI_RESUME = """Anita Roy
+Email: anita.roy.ai@example.com | Phone: (555) 789-2341
+Location: Seattle, WA | LinkedIn: linkedin.com/in/anita-roy-ai
+
+PROFESSIONAL SUMMARY
+AI/ML Engineer with 5 years experience specializing in production Retrieval-Augmented Generation (RAG) and LLM inference optimization.
+• Designed and productionized low-latency RAG pipelines with ChromaDB and LangChain, reducing vector query latency from 1.5s to 180ms.
+• Fine-tuned open-source PyTorch models on custom enterprise corpora, reducing hallucination rates by 42%.
+• Built scalable FastAPI inference microservices with async batching and Redis caching.
+
+SKILLS
+PyTorch, LangChain, RAG, Vector DB, ChromaDB, Python, FastAPI, Docker, PostgreSQL"""
+
+
+SAMPLE_NONMATCHING_CHEF_RESUME = """Chef Marco Pierre
+Email: marco.pierre@culinaryart.com | Phone: (555) 901-4567
+Location: Chicago, IL
+
+PROFESSIONAL SUMMARY
+Accomplished Executive Head Chef with 10+ years directing high-volume Michelin-starred restaurant kitchens.
+• Mastered French and Northern Italian classic cuisine, pastry arts, and precision knife handling.
+• Managed kitchen inventory, food cost accounting, supplier negotiations, and strict HACCP food hygiene compliance.
+• Trained and supervised 20 sous chefs, line cooks, and banquet staff across 3 dining rooms.
+
+SKILLS
+Culinary Arts, Pastry, French Cuisine, Kitchen Operations, Menu Design, HACCP Compliance, Food Safety"""
+

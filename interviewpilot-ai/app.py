@@ -43,14 +43,20 @@ from pipeline_manager import (
     complete_candidate_interview,
     approve_for_second_round,
     place_candidate_on_hold,
-    retry_candidate_invitation_email
+    retry_candidate_invitation_email,
+    match_resume_to_profiles
 )
 from email_service import get_base_url, retry_failed_notification
 from agent import InterviewPilotAgent
 from tools import get_activity_logs, clear_activity_logs
 from report_generator import create_competency_radar_chart, create_competency_bar_chart, generate_markdown_report
-from resume_parser import parse_resume
-from demo_data import SAMPLE_RESPONSES
+from resume_parser import parse_resume, extract_text_from_pdf
+from demo_data import (
+    SAMPLE_RESPONSES,
+    SAMPLE_DEVOPS_RESUME,
+    SAMPLE_AI_RESUME,
+    SAMPLE_NONMATCHING_CHEF_RESUME
+)
 
 
 # Ensure database tables exist and are seeded
@@ -280,18 +286,21 @@ if st.session_state.active_portal == "Candidate Portal":
 
             token_input = st.text_input("Interview Token", placeholder="e.g. jA9eK3_z9L...")
 
-            # Quick-Load Helper for Demonstration
-            st.markdown("**⚡ Live Demonstration Shortcut:**")
-            invited_cands = [c for c in get_candidates_list() if c.get("token")]
+            # Quick-Load Helper for Demonstration & Testing
+            st.markdown("**⚡ Quick Test: Select an Approved Candidate**")
+            invited_cands = [c for c in get_candidates_list() if c.get("token") and c["workflow_status"] in ("INVITED", "IN_PROGRESS", "FIRST_ROUND_APPROVED")]
             if invited_cands:
-                sample_cand = invited_cands[0]
-                if st.button(f"⚡ Load {sample_cand['name']}'s Active Token ({sample_cand['token'][:10]}...)", use_container_width=True):
-                    st.session_state.candidate_token = sample_cand["token"]
+                cand_options = {f"{c['name']} — {c['job_title']} ({c['token'][:8]}...)": c["token"] for c in invited_cands}
+                selected_cand_label = st.selectbox("Approved Candidates Ready to Interview:", list(cand_options.keys()))
+                if st.button("🚀 Enter Screening Room as Selected Candidate", type="primary", use_container_width=True):
+                    st.session_state.candidate_token = cand_options[selected_cand_label]
+                    st.query_params["token"] = cand_options[selected_cand_label]
                     st.rerun()
             else:
                 st.caption("No active interview sessions yet. Approve a candidate in the Admin Portal to generate an invitation link.")
 
-            if st.button("🔓 Validate Token & Enter", type="primary", use_container_width=True):
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔓 Validate Token & Enter", use_container_width=True):
                 if token_input.strip():
                     st.session_state.candidate_token = token_input.strip()
                     st.rerun()
@@ -660,7 +669,8 @@ elif st.session_state.active_portal == "Admin Portal":
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Admin Navigation Tabs
-    tab_candidates, tab_pipeline, tab_scorecards, tab_email_activity = st.tabs([
+    tab_upload, tab_candidates, tab_pipeline, tab_scorecards, tab_email_activity = st.tabs([
+        "📤 Ingest & Auto-Match Resume",
         "👥 Candidate Management (Shortlist Review)",
         "📊 Interview Pipeline Kanban",
         "📑 Completed Interview Scorecards & Audit",
@@ -668,11 +678,211 @@ elif st.session_state.active_portal == "Admin Portal":
     ])
 
     # ------------------------------------------------------------------------
-    # TAB 1: CANDIDATE MANAGEMENT (STEP 1: REVIEW SHORTLISTED CANDIDATES)
+    # TAB 1: RESUME INGESTION & AUTO-MATCHING (USE CASE 1 - RESUME MATCHING)
+    # ------------------------------------------------------------------------
+    with tab_upload:
+        st.markdown("### 📤 AI Resume Ingestion & Role Matching Engine")
+        st.markdown(
+            "Upload a candidate's resume (PDF file or plain text). The AI Agent evaluates technical skills, "
+            "experience, and achievements against all **5 active enterprise roles**, automatically assigns the candidate "
+            "to the highest-matching profile bucket if qualified, or flags if the resume does not match any open role."
+        )
+
+        st.markdown("""
+        <div class="saas-card">
+            <h4 style="color:#38BDF8; margin-top:0;">⚡ Live Demonstration Quick-Fill Shortcuts</h4>
+            <p style="color:#94A3B8; font-size:0.88rem; margin-bottom: 8px;">
+                Click a profile below to immediately populate a synthetic test resume:
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        qf_c1, qf_c2, qf_c3 = st.columns(3)
+        with qf_c1:
+            if st.button("⚡ Load DevOps Lead Sample (Matches DevOps)", use_container_width=True):
+                st.session_state.upload_text_val = SAMPLE_DEVOPS_RESUME
+                st.session_state.upload_name_val = "David Ross"
+                st.session_state.upload_email_val = "david.ross.devops@example.com"
+                st.session_state.upload_match_result = None
+                st.rerun()
+        with qf_c2:
+            if st.button("⚡ Load AI Engineer Sample (Matches AI Systems)", use_container_width=True):
+                st.session_state.upload_text_val = SAMPLE_AI_RESUME
+                st.session_state.upload_name_val = "Anita Roy"
+                st.session_state.upload_email_val = "anita.roy.ai@example.com"
+                st.session_state.upload_match_result = None
+                st.rerun()
+        with qf_c3:
+            if st.button("⚡ Load Non-Matching Sample (Chef Marco)", use_container_width=True):
+                st.session_state.upload_text_val = SAMPLE_NONMATCHING_CHEF_RESUME
+                st.session_state.upload_name_val = "Chef Marco Pierre"
+                st.session_state.upload_email_val = "marco.pierre@culinaryart.com"
+                st.session_state.upload_match_result = None
+                st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        up_col1, up_col2 = st.columns([1.2, 1.0])
+        with up_col1:
+            uploaded_pdf = st.file_uploader("Upload Resume File (PDF)", type=["pdf"], key="admin_pdf_uploader")
+            pdf_extracted_text = ""
+            if uploaded_pdf is not None:
+                try:
+                    pdf_extracted_text = extract_text_from_pdf(uploaded_pdf)
+                    st.success(f"✓ Successfully extracted text from PDF ({len(pdf_extracted_text)} characters).")
+                except Exception as e:
+                    st.error(f"Error reading PDF: {e}")
+
+            initial_text = pdf_extracted_text if pdf_extracted_text else st.session_state.get("upload_text_val", "")
+            resume_text_input = st.text_area(
+                "Or Review / Paste Candidate Resume Text",
+                value=initial_text,
+                height=220,
+                placeholder="Paste candidate resume text with work history, projects, and skills..."
+            )
+
+        with up_col2:
+            st.markdown("""
+            <div class="saas-card" style="height:100%;">
+                <h4 style="color:#FFFFFF; margin-top:0;">📋 Candidate Identity (Optional Override)</h4>
+                <p style="color:#94A3B8; font-size:0.85rem;">
+                    If omitted, the agent automatically detects candidate name and email from the resume.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            cand_name_ov = st.text_input("Candidate Name", value=st.session_state.get("upload_name_val", ""), placeholder="e.g. David Ross")
+            cand_email_ov = st.text_input("Candidate Email (for Interview Invitation)", value=st.session_state.get("upload_email_val", ""), placeholder="e.g. david.ross@example.com")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🤖 Analyze & Auto-Match Resume to Open Roles", type="primary", use_container_width=True):
+            if not resume_text_input.strip():
+                st.warning("Please upload a PDF or enter resume text to analyze.")
+            else:
+                with st.spinner("AI Agent analyzing skills, taxonomy keywords, and job alignment across all 5 open roles..."):
+                    match_res = match_resume_to_profiles(
+                        raw_text=resume_text_input,
+                        override_name=cand_name_ov,
+                        override_email=cand_email_ov,
+                        min_threshold=50,
+                        save_if_matched=True
+                    )
+                    st.session_state.upload_match_result = match_res
+                    st.rerun()
+
+        # Display Evaluation & Matching Results
+        if st.session_state.get("upload_match_result"):
+            res = st.session_state.upload_match_result
+
+            if res["matched"]:
+                st.markdown(f"""
+                <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid #10B981; border-radius: 12px; padding: 22px; margin-top: 20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div>
+                            <span class="status-pill pill-emerald">🎉 MATCHED & SHORTLISTED</span>
+                            <h2 style="margin: 8px 0 4px 0; color:#FFFFFF;">{res['candidate_name']}</h2>
+                            <p style="margin:0; color:#38BDF8; font-weight:600; font-size:1.1rem;">
+                                Assigned Role Bucket: {res['matched_job']['job_title']} ({res['matched_job']['department']})
+                            </p>
+                            <p style="margin:4px 0 0 0; color:#94A3B8; font-size:0.9rem;">
+                                📧 {res['candidate_email']} • 💼 {res['experience_years']} Years Experience • ID: <code>{res['candidate_id']}</code>
+                            </p>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:2.4rem; font-weight:800; color:#10B981;">{res['match_score']}%</div>
+                            <div style="font-size:0.75rem; color:#94A3B8; text-transform:uppercase;">Profile Match Score</div>
+                        </div>
+                    </div>
+                    <div style="margin: 14px 0;">
+                        <strong style="color:#CBD5E1;">Matched Core Skills:</strong><br>
+                        {''.join([f'<span class="skill-tag" style="background:#065F46; color:#A7F3D0; border:1px solid #10B981;">✓ {s}</span>' for s in res['matched_skills']])}
+                    </div>
+                    <p style="color:#CBD5E1; font-size:0.9rem; margin-bottom:0;">
+                        <strong>AI Shortlist Rationale:</strong> {res['summary']}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                act_col1, act_col2 = st.columns([1.5, 1.0])
+
+                with act_col1:
+                    # Check candidate status in database
+                    curr_cand = get_candidate_details(res["candidate_id"])
+                    if curr_cand and curr_cand["workflow_status"] in ("SHORTLISTED", "INVITATION_FAILED"):
+                        st.markdown("**Next Step: Authorize Candidate for First-Round Interview**")
+                        if st.button(f"✅ Approve {res['candidate_name']} for First-Round Interview", key="app_up_btn", type="primary", use_container_width=True):
+                            with st.spinner(f"Synthesizing 8-10 question agenda and dispatching invitation to {res['candidate_email']}..."):
+                                app_res = approve_for_first_round(res["candidate_id"])
+                                if app_res["status"] == "success":
+                                    st.session_state.toast_msg = f"Approved {res['candidate_name']}! Invitation dispatched."
+                                    st.session_state.upload_approval_details = app_res
+                                    st.rerun()
+                                else:
+                                    st.error(app_res["message"])
+
+                    elif curr_cand and curr_cand["workflow_status"] in ("INVITED", "FIRST_ROUND_APPROVED"):
+                        base_url = get_base_url()
+                        cand_url = f"{base_url}/?token={curr_cand['token']}"
+                        st.success(f"✉️ Invitation Email Dispatched to {curr_cand['email']}! Status: {curr_cand.get('session_status', 'ACTIVE')}")
+
+                        st.markdown(f"""
+                        <div style="background: rgba(56, 189, 248, 0.12); border: 1px solid #38BDF8; border-radius: 8px; padding: 12px; margin: 10px 0;">
+                            <strong style="color:#38BDF8;">🔗 Direct Candidate Interview Link:</strong><br>
+                            <a href="{cand_url}" target="_blank" style="color:#60A5FA; font-size:0.95rem; word-break:break-all;">{cand_url}</a>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        if st.button("🚀 Open Candidate Portal to Take Interview Now", key="go_cand_now", type="primary", use_container_width=True):
+                            st.session_state.active_portal = "Candidate Portal"
+                            st.session_state.candidate_token = curr_cand["token"]
+                            st.query_params["token"] = curr_cand["token"]
+                            st.session_state.candidate_agent = None
+                            st.session_state.interview_started = False
+                            st.rerun()
+
+                with act_col2:
+                    st.download_button(
+                        label="📥 Download Candidate Resume (.txt)",
+                        data=res["resume_text"],
+                        file_name=f"{res['candidate_name'].replace(' ', '_')}_Resume.txt",
+                        mime="text/plain",
+                        key="dl_up_resume",
+                        use_container_width=True
+                    )
+
+            else:
+                # Non-matching profile result
+                st.markdown(f"""
+                <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid #EF4444; border-radius: 12px; padding: 22px; margin-top: 20px;">
+                    <span class="status-pill pill-red">⚠️ NOT MATCHING ANY PROFILE</span>
+                    <h2 style="margin: 8px 0 4px 0; color:#FFFFFF;">{res['candidate_name']}</h2>
+                    <p style="margin:0; color:#F87171; font-weight:600; font-size:1.05rem;">
+                        {res['reason']}
+                    </p>
+                    <p style="margin:6px 0 0 0; color:#94A3B8; font-size:0.88rem;">
+                        This candidate profile does not meet minimum technical qualifications (50% threshold) and has NOT been shortlisted.
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown("<br><strong>📊 Alignment Across All 5 Open Roles:</strong>", unsafe_allow_html=True)
+                breakdown_data = []
+                for ev in res["all_evaluations"]:
+                    breakdown_data.append({
+                        "Job Title": ev["job_title"],
+                        "Department": ev["department"],
+                        "Match Score": f"{ev['match_score']}%",
+                        "Matched Skills": ", ".join(ev["matched_skills"]) if ev["matched_skills"] else "None",
+                        "Qualification Status": "🔴 Below 50% Threshold"
+                    })
+                st.table(breakdown_data)
+
+    # ------------------------------------------------------------------------
+    # TAB 2: CANDIDATE MANAGEMENT (STEP 1: REVIEW SHORTLISTED CANDIDATES)
     # ------------------------------------------------------------------------
     with tab_candidates:
         st.markdown("### Step 1: Review Shortlisted Candidates")
-        st.markdown("Review candidate resumes, inspect AI match scores, and execute **Approve for First-Round Interview** to automatically dispatch secure interview invitations.")
+        st.markdown("Review candidate resumes, inspect AI match scores, download resumes, and execute **Approve for First-Round Interview** to automatically dispatch secure interview invitations.")
 
         # Filters and Search
         f_c1, f_c2, f_c3 = st.columns([1.5, 1.2, 1.2])
@@ -752,7 +962,7 @@ elif st.session_state.active_portal == "Admin Portal":
                 </div>
                 """, unsafe_allow_html=True)
 
-                btn_col1, btn_col2 = st.columns([1.5, 1.0])
+                btn_col1, btn_col2, btn_col3 = st.columns([1.5, 0.9, 0.9])
 
                 with btn_col1:
                     # Action: Approve for First-Round Interview
@@ -767,15 +977,33 @@ elif st.session_state.active_portal == "Admin Portal":
                                     st.error(res["message"])
 
                     elif c["workflow_status"] in ("INVITED", "FIRST_ROUND_APPROVED"):
-                        st.info(f"✉️ Invitation sent ({c.get('last_email_status', 'SENT')}). Candidate link is active.")
-                        if st.button(f"🔄 Resend Invitation Email ({c['name']})", key=f"resend_{c['id']}"):
-                            with st.spinner("Retrying email dispatch..."):
-                                retry_res = retry_candidate_invitation_email(c["id"])
-                                st.session_state.toast_msg = f"Email re-dispatched to {c['email']} ({retry_res['delivery_status']})"
+                        base_url = get_base_url()
+                        cand_url = f"{base_url}/?token={c['token']}"
+                        st.markdown(f"""
+                        <div style="background: rgba(56, 189, 248, 0.1); border: 1px solid #38BDF8; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px;">
+                            <span style="color:#38BDF8; font-weight:bold; font-size:0.82rem;">🔗 Interview Link:</span>
+                            <a href="{cand_url}" target="_blank" style="color:#60A5FA; font-size:0.82rem; word-break:break-all;">{cand_url}</a>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        col_act_a, col_act_b = st.columns(2)
+                        with col_act_a:
+                            if st.button(f"🚀 Open Candidate Portal", key=f"test_cand_{c['id']}", type="primary", use_container_width=True):
+                                st.session_state.active_portal = "Candidate Portal"
+                                st.session_state.candidate_token = c["token"]
+                                st.query_params["token"] = c["token"]
+                                st.session_state.candidate_agent = None
+                                st.session_state.interview_started = False
                                 st.rerun()
+                        with col_act_b:
+                            if st.button(f"🔄 Resend Email", key=f"resend_{c['id']}", use_container_width=True):
+                                with st.spinner("Retrying email dispatch..."):
+                                    retry_res = retry_candidate_invitation_email(c["id"])
+                                    st.session_state.toast_msg = f"Email re-dispatched to {c['email']} ({retry_res['delivery_status']})"
+                                    st.rerun()
 
                     elif c["workflow_status"] in ("COMPLETED", "HUMAN_REVIEW_REQUIRED"):
-                        st.success(f"🎯 Interview Completed! Rating: {c.get('overall_score', 'N/A')}/5.0 — Review scorecard in Tab 3.")
+                        st.success(f"🎯 Interview Completed! Rating: {c.get('overall_score', 'N/A')}/5.0 — Review scorecard in Tab 4.")
 
                     elif c["workflow_status"] == "SECOND_ROUND_APPROVED":
                         st.markdown('<span class="status-pill pill-emerald">Approved for Second Round</span>', unsafe_allow_html=True)
@@ -784,10 +1012,28 @@ elif st.session_state.active_portal == "Admin Portal":
                         st.markdown('<span class="status-pill pill-amber">Placed on Hold</span>', unsafe_allow_html=True)
 
                 with btn_col2:
-                    with st.popover("📄 Inspect Full Resume & Claims"):
+                    st.download_button(
+                        label="📥 Download Resume",
+                        data=c["resume_text"],
+                        file_name=f"{c['name'].replace(' ', '_')}_Resume.txt",
+                        mime="text/plain",
+                        key=f"dl_card_{c['id']}",
+                        use_container_width=True
+                    )
+
+                with btn_col3:
+                    with st.popover("📄 Inspect Claims"):
                         st.markdown(f"#### {c['name']} — Resume Details")
                         st.markdown(f"**Target Role:** {c['job_title']}")
-                        st.text_area("Verifiable Resume Text", value=c["resume_text"], height=250)
+                        st.text_area("Verifiable Resume Text", value=c["resume_text"], height=220)
+                        st.download_button(
+                            label="📥 Download Resume (.txt)",
+                            data=c["resume_text"],
+                            file_name=f"{c['name'].replace(' ', '_')}_Resume.txt",
+                            mime="text/plain",
+                            key=f"dl_pop_{c['id']}",
+                            use_container_width=True
+                        )
 
                 st.markdown("<hr style='border-color: rgba(255,255,255,0.06); margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
 
