@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+data/uploads/*
+data/exports/*
+frontend/node_modules
+frontend/dist
+.vscode
+.antigravity
