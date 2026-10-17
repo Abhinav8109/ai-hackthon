@@ -1,110 +1,127 @@
-# 🤖 InterviewPilot AI — Agentic First-Round Screening Assistant
-> **Autonomous, Resume-Aware, and Rubric-Anchored Technical Screening Interviewer with Human-in-the-Loop Oversight.**
+# 🤖 TalentPilot AI — Enterprise Agentic Technical Screening Platform
+> **Autonomous, Resume-Aware, and Rubric-Anchored Technical Screening Interviewer with Relational SQLite Persistence and Human-in-the-Loop Oversight.**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-FF4B4B?logo=streamlit)](https://streamlit.io)
+[![SQLite](https://img.shields.io/badge/SQLite-ACID_Compliant-003B57?logo=sqlite)](https://sqlite.org)
 [![Plotly](https://img.shields.io/badge/Plotly-Visualization-3F4F75?logo=plotly)](https://plotly.com)
 [![Pydantic](https://img.shields.io/badge/Pydantic-Data_Validation-E92063?logo=pydantic)](https://pydantic.dev)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
-## 📌 Executive Overview & Problem Statement
+## 📌 Executive Overview & Architecture
 
-Traditional first-round technical screening interviews suffer from three critical bottlenecks:
-1. **Generic Questionnaires:** Static question banks ignore a candidate's actual projects and specific resume claims.
-2. **Lack of Adaptive Depth:** Shallow answers pass through without probing, or conversely, competent engineers get penalized by rigid scoring scripts.
-3. **Score Inconsistency & Hallucination:** Different recruiters grade arbitrarily without grounding evaluations in verifiable evidence.
+**TalentPilot AI** is an enterprise-grade AI recruitment platform combining **Use Case 1 (Shortlisted Candidate Review)** and **Use Case 4 (Agentic Technical Screening Interview)** into an automated workflow governed by strict human oversight.
 
-**InterviewPilot AI** solves this by acting as an **autonomous, agentic interviewer**. It ingests candidate resumes (PDF or raw text) and job descriptions, formulates tailored questions anchored to specific resume claims, adaptively probes incomplete answers, executes real Python evaluation tools, and generates an audit-ready scorecard with human oversight safeguards.
+### 🔑 Key Architectural Principles
+
+1. **Strict Separation of Concerns:**
+   - **Admin Portal:** Central talent command center for reviewing shortlisted profiles across 5 enterprise job roles (*Software Engineer, DevOps, AI Systems, Frontend Architect, Data Platform*), inspecting resume claims, approving candidates for Round 1, and approving final candidates for Round 2.
+   - **Candidate Portal:** Fully isolated, token-authenticated candidate interview interface accessed exclusively via unique invitation links (`http://localhost:8501/?token=<secure-token>`).
+2. **Complete Eradication of "Launch Interview" in Admin:**
+   - The Admin Portal **never contains a "Launch Interview" button**, menu item, or direct session trigger. Admins perform only one business decision: **"Approve for First-Round Interview"**.
+   - The interview can only be started independently by the candidate after receiving the invitation.
+3. **Automated Pipeline Orchestration:**
+   - Clicking **"Approve for First-Round Interview"** automatically validates candidate data, formulates an 8–10 tailored question plan anchored to verified resume claims, creates a cryptographically secure session token, and dispatches the official invitation email to the candidate's inbox (e.g. `sukrit.ss.31@gmail.com`).
+4. **Relational SQLite Persistence:**
+   - Complete schema tracking jobs, candidates, question plans, sessions, turn-by-turn Q&A responses, evaluation scorecards, notification logs, and immutable audit trails.
+5. **Truth in Delivery Email Service:**
+   - Real SMTP integration with TLS fallback to structured developer mock (`ACCEPTED_DEV_MOCK`). The system never falsely reports mock dispatches as real SMTP delivery.
+6. **Anti-Resubmission Locks:**
+   - Once an interview is submitted, the session token is locked to prevent tampering or duplicate evaluations.
 
 ---
 
-## 🌟 What Makes It Truly Agentic?
-
-Unlike static chatbots or simple prompt wrappers, InterviewPilot AI implements a **deterministic, observable Python orchestrator loop**:
+## 🔄 End-to-End Business Workflow
 
 ```mermaid
 flowchart TD
-    A[📄 Resume PDF & Job Description] --> B[🧠 Planner Agent: Synthesize 5 Targeted Questions]
-    B --> C[🎙️ Present Question to Candidate]
-    C --> D[📝 Candidate Submits Answer]
-    D --> E[⚙️ Tool Call: search_resume_claims]
-    E --> F[⚙️ Tool Call: evaluate_answer]
-    F --> G[⚙️ Tool Call: validate_score_evidence]
-    G --> H{Answer Completeness >= 60%?}
-    H -- "No (Shallow Answer)" --> I[⚡ Adaptive Agent Decision: Trigger Targeted Follow-up Probe]
-    I --> J[📝 Candidate Submits Follow-up]
-    J --> K[⚖️ Re-evaluate & Blend Scores]
-    H -- "Yes (Sufficient)" --> L[📈 Adaptive Difficulty Adjustment]
-    K --> L
-    L --> M[⚙️ Tool Call: check_competency_coverage]
-    M --> N{All Questions Answered?}
-    N -- "No" --> C
-    N -- "Yes" --> O[⚙️ Tool Call: detect_consistency]
-    O --> P[📊 Comprehensive Scorecard & Recruiter Audit]
+    subgraph Step1 ["Step 1: Admin Talent Review"]
+        A[Admin logs into Portal] --> B[Filter candidates by Role: SE, DevOps, AI, Frontend, Data]
+        B --> C[Inspect Candidate: Sukrit Sharma, sukrit.ss.31@gmail.com]
+    end
+
+    subgraph Step2 ["Step 2 & 3: Human Approval & Auto-Dispatch"]
+        C --> D["Click 'Approve for First-Round Interview' (No 'Launch Interview')"]
+        D --> E[Synthesize 8-10 Question Agenda]
+        E --> F[Generate Cryptographic Token & Session]
+        F --> G["Dispatch Invitation Email (Subject: First-Round Interview Invitation — [Job Title])"]
+    end
+
+    subgraph Step4 ["Step 4 & 5: Candidate Screening Interview"]
+        G --> H["Candidate opens URL: http://localhost:8501/?token=<token>"]
+        H --> I[Validate Token & Present Welcome Screen]
+        I --> J[Candidate clicks 'Start Interview']
+        J --> K[Conduct 8-10 Question Technical Screening]
+        K --> L{Answer Completeness >= 60%?}
+        L -- "No" --> M[Adaptive Follow-up Probe triggered]
+        M --> N[Candidate submits recovery response]
+        N --> O[Blended Scoring & Turn Persistence]
+        L -- "Yes" --> O
+    end
+
+    subgraph Step6 ["Step 6 & 7: Scorecard & Final Review"]
+        O --> P[All questions answered -> Final Scorecard compiled]
+        P --> Q[Lock Token & Session to prevent re-submission]
+        Q --> R[Admin reviews Scorecard in Completed Interviews tab]
+    end
+
+    subgraph Step8 ["Step 8: Second-Round Approval"]
+        R --> S["Admin clicks 'Approve for Second Round'"]
+        S --> T["Dispatch Second-Round Email (Subject: Congratulations — Selected for the Second Round)"]
+    end
 ```
-
-### 1. Resume-Aware Probing
-The system parses specific technical accomplishments (e.g., *"reduced RAG query latency from 1.8s to 240ms"*, *"managed 25,000 req/sec on Kubernetes"*) and dynamically anchors interview questions to those claims.
-
-### 2. Adaptive Follow-up Engine
-If a candidate gives a shallow or vague response (completeness < 60%), the agent immediately intervenes with a targeted follow-up probe (e.g., asking for specific architectural metrics, failure modes, or trade-offs) before assigning a final score.
-
-### 3. Observable Tool Execution & Activity Timeline
-Every single agent decision executes real Python functions:
-- `search_resume_claims()`: Cross-references claims against tech taxonomies.
-- `evaluate_answer()`: Scores response against standard 1–5 rubrics.
-- `validate_score_evidence()`: Verifies that assigned scores are backed by verbatim candidate quotes.
-- `check_competency_coverage()`: Audits coverage across 5 core domains.
-- `detect_consistency()`: Surfaces gaps between resume claims and spoken answers.
-
-### 4. Human-in-the-Loop Safeguards
-**Zero automated rejection.** The system classifies candidates into `ADVANCE TO TECHNICAL ROUND`, `HOLD / BORDERLINE`, or `NEEDS HUMAN REVIEW`. Low confidence or inconsistent findings are explicitly flagged for human recruiter follow-up.
 
 ---
 
-## 📂 Project Architecture
+## 📂 Repository Layout
 
 ```
 interviewpilot-ai/
-├── app.py                  # Modern Dark Navy Streamlit SaaS UI & Controllers
-├── agent.py                # Agentic Orchestrator & State Management
-├── tools.py                # Core Python Evaluation & Audit Tools
+├── app.py                  # High-end Dark Slate Streamlit SaaS UI (Admin & Candidate Portals)
+├── database.py             # SQLite Relational Engine, Auto-seeding, and Query API
+├── pipeline_manager.py     # End-to-End Recruitment Orchestration & Security Gateway
+├── email_service.py        # SMTP / Mock Notification Dispatcher & Activity Tracker
+├── agent.py                # 8-10 Question Adaptive Interview Agent & Tool Invoker
+├── tools.py                # Deterministic Python Evaluation & Rubric Scoring Tools
 ├── resume_parser.py        # PDF Extraction & Pydantic Claim Parser
-├── report_generator.py     # Plotly Visualizations & Scorecard Generation
-├── demo_data.py            # Synthetic 1-Click Resume, JD, and Test Responses
-├── requirements.txt        # Minimal, lightweight dependencies
-├── .env.example            # Optional LLM configuration
-├── .gitignore              # Clean repository hygiene
-├── README.md               # Complete documentation
+├── report_generator.py     # 4-Domain Scorecard Aggregations & Plotly Radar Charts
+├── demo_data.py            # Synthetic Profiles, JDs, and Reference Benchmarks
+├── requirements.txt        # Production Dependencies
+├── README.md               # Enterprise Documentation
 └── tests/
-    └── test_agent.py       # 100% Passing Automated Test Suite
+    ├── test_agent.py       # Core Agent Mechanics & Role Bucket Suite
+    └── test_workflow.py    # 16-Step End-to-End Acceptance Test Suite
 ```
 
 ---
 
-## 🚀 Quickstart & Local Installation
+## 🚀 Quickstart & Local Execution
 
-### Prerequisites
-- Python 3.10, 3.11, 3.12, 3.13, or 3.14
-- pip / virtualenv
-
-### 1. Clone & Setup Virtual Environment
+### 1. Setup Virtual Environment
 ```bash
-# Clone the repository
-git clone https://github.com/Abhinav8109/ai-hackthon.git
-cd ai-hackthon/interviewpilot-ai
-
-# Create and activate virtual environment
+cd interviewpilot-ai
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install lightweight dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Run the Application
+### 2. Configure Email Service (Optional Real SMTP)
+By default, the platform runs in structured developer mock mode (`ACCEPTED_DEV_MOCK`), which logs all emails with full headers and body text in the database and UI without external dependencies.
+
+To enable live SMTP delivery (e.g. Gmail App Password):
+```bash
+export SMTP_HOST="smtp.gmail.com"
+export SMTP_PORT="587"
+export SMTP_USERNAME="your-email@gmail.com"
+export SMTP_PASSWORD="your-16-char-app-password"
+export SMTP_SENDER_EMAIL="your-email@gmail.com"
+export SMTP_USE_TLS="true"
+export APP_BASE_URL="http://localhost:8501"
+```
+
+### 3. Launch Streamlit Platform
 ```bash
 streamlit run app.py
 ```
@@ -112,68 +129,52 @@ Open your browser at `http://localhost:8501`.
 
 ---
 
-## ⚡ Zero-Dependency 1-Click Demo Walkthrough
+## 🧪 Automated Acceptance & Validation Test Suites
 
-The project is designed to run **100% offline without any paid API keys or external services**.
+Both test suites execute 100% deterministically and offline without requiring third-party API keys.
 
-1. **Load Demo:** Click the blue **"⚡ Load 1-Click Synthetic Demo"** button in the sidebar. This loads a verified senior engineer profile (*Alex Chen*) and a Senior AI Systems JD.
-2. **Synthesize Agenda:** Click **"🚀 Synthesize Agentic Interview Plan"**. Notice how each generated question targets a specific claim from Alex's resume.
-3. **Test Adaptive Follow-up:**
-   - On Question 1, click **"⚠️ Test Shallow Answer"** and submit.
-   - Watch the **Live Agent Activity Panel** record real tool calls and observe the glowing **Adaptive Follow-up Probe** appear asking for trade-offs.
-   - Click **"⚡ Quick-Fill Strong Follow-up Answer"** and submit to watch the agent reward the recovery and advance.
-4. **Inspect Audit Scorecard:** Navigate to the **Final Scorecard & Audit** tab to review:
-   - Overall Weighted Score & Recruiter Recommendation.
-   - Interactive Plotly Competency Radar Chart.
-   - Question-by-question verbatim quote evidence.
-   - Resume claim verification matrix.
-   - One-click export to Markdown (`.md`) or Candidate Feedback letter (`.txt`).
-
----
-
-## 🧪 Automated Test Suite
-
-Run the full end-to-end verification suite:
-
+### Run Agent Mechanics Tests
 ```bash
 python tests/test_agent.py
 ```
+- Validates PDF claim extraction
+- Verifies 8–10 tailored question planning
+- Tests adaptive follow-up triggering on shallow answers and score recovery
+- Confirms 5 role buckets and token validation gateway
 
-Expected output:
-```text
-==================================================
-   RUNNING INTERVIEWPILOT AI VALIDATION SUITE    
-==================================================
-Testing Resume Parser...
-✓ Parsed candidate: Alex Chen, Extracted 12 claims.
-
-Testing Interview Planning...
-✓ Successfully planned 5 resume-anchored interview questions.
-
-Testing Adaptive Follow-up on Shallow Answer...
-✓ Shallow answer correctly triggered follow-up probe: 'What key trade-offs...'
-
-Testing Follow-up Resolution with Strong Answer...
-✓ Follow-up resolved; score recovered to 5/5 and advanced to Q2.
-
-Testing Full 5-Question Interview Flow & Final Report...
-✓ Full interview completed. Overall score: 3.6/5.0 | Rec: NEEDS HUMAN REVIEW
-
-Testing Reset Functionality...
-✓ Reset verified cleanly.
-
-==================================================
-   ALL TESTS PASSED WITH 100% SUCCESS RATE!       
-==================================================
+### Run End-to-End Workflow Acceptance Suite
+```bash
+python tests/test_workflow.py
 ```
+Validates all 16 business workflow acceptance criteria:
+1. Shortlisted candidate review
+2. Profile and resume claim inspection
+3. Admin approval for first round (verifies **absence of any "Launch Interview" button**)
+4. Cryptographic invitation token and session creation
+5. Automated invitation email dispatch to `sukrit.ss.31@gmail.com`
+6. 8–10 question tailored agenda synthesis
+7. Candidate token authentication and session initiation
+8. Adaptive follow-up probing and live turn recording
+9. Candidate interview submission
+10. SQLite turn persistence and scorecard compilation
+11. Admin review in Completed Interviews tab
+12. Admin approval for second round
+13. Automated second-round notification email dispatch
+14. Duplicate approval prevention
+15. Anti-resubmission token locking
+16. Immutable audit trail logging
 
 ---
 
-## 🛡️ Responsible AI & Ethical Hiring Standards
+## 🛡️ Responsible AI & Evaluation Rubrics
 
-- **No Black-Box Automated Rejection:** AI outputs are strictly decision-support recommendations for human recruiters.
-- **Evidence-Grounded Scoring:** Evaluator agent must quote candidate answers directly; ungrounded scores fail validation.
-- **Constructive Inconsistency Surfacing:** Resume discrepancies are categorized neutrally as *"Needs Clarification"* for the Round-2 human interviewer rather than making punitive assertions.
+- **Four Core Assessment Domains:**
+  1. *Technical Depth & Architecture* (35% weight)
+  2. *Problem Solving & Trade-offs* (30% weight)
+  3. *Communication & Structured Thinking* (20% weight)
+  4. *Job & Competency Alignment* (15% weight)
+- **Observable Execution:** Every tool call (`search_resume_claims`, `evaluate_answer`, `validate_score_evidence`, `detect_consistency`) logs real execution parameters in SQLite and the UI timeline.
+- **Human Decision Oversight:** Recommendations (`ADVANCE`, `HOLD`, `REJECT`) serve as advisory intelligence. Final hiring decisions always require human recruiter approval.
 
 ---
 
