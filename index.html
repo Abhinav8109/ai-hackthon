@@ -3,43 +3,432 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hello World</title>
+  <title>AI Hackers</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Poppins:wght@300;600&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
-      margin: 0;
       min-height: 100vh;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #0a0a1a;
+      font-family: 'Poppins', sans-serif;
+    }
+
+    /* Animated gradient background */
+    .bg {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(125deg, #0a0a1a 0%, #1a0a2e 25%, #0d1b2a 50%, #1b2838 75%, #0a0a1a 100%);
+      background-size: 400% 400%;
+      animation: bgShift 15s ease infinite;
+      z-index: 0;
+    }
+    @keyframes bgShift {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+
+    /* Grid overlay */
+    .grid-overlay {
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      z-index: 1;
+    }
+
+    /* Floating bubbles container */
+    .bubbles-container {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .bubble {
+      position: absolute;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%,
+        rgba(255, 255, 255, 0.15),
+        rgba(0, 255, 255, 0.05) 40%,
+        rgba(138, 43, 226, 0.05) 70%,
+        transparent 100%);
+      border: 1px solid rgba(0, 255, 255, 0.12);
+      box-shadow:
+        inset 0 0 20px rgba(0, 255, 255, 0.05),
+        0 0 15px rgba(0, 255, 255, 0.05);
+      animation: floatUp linear infinite;
+    }
+
+    .bubble::before {
+      content: '';
+      position: absolute;
+      top: 15%;
+      left: 20%;
+      width: 30%;
+      height: 20%;
+      background: radial-gradient(ellipse, rgba(255, 255, 255, 0.3), transparent);
+      border-radius: 50%;
+      transform: rotate(-30deg);
+    }
+
+    @keyframes floatUp {
+      0% {
+        transform: translateY(100vh) scale(0.3) rotate(0deg);
+        opacity: 0;
+      }
+      10% { opacity: 1; }
+      90% { opacity: 0.8; }
+      100% {
+        transform: translateY(-120vh) scale(1) rotate(360deg);
+        opacity: 0;
+      }
+    }
+
+    /* Main content */
+    .content {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+    }
+
+    /* Main title bubble */
+    .title-bubble {
+      position: relative;
+      display: inline-block;
+      padding: 50px 80px;
+      border-radius: 50%;
+      width: 420px;
+      height: 420px;
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #ffffff;
+      background: radial-gradient(circle at 30% 25%,
+        rgba(255, 255, 255, 0.12),
+        rgba(0, 255, 255, 0.06) 30%,
+        rgba(138, 43, 226, 0.06) 60%,
+        rgba(0, 0, 0, 0.3) 100%);
+      border: 2px solid rgba(0, 255, 255, 0.2);
+      box-shadow:
+        0 0 60px rgba(0, 255, 255, 0.15),
+        0 0 120px rgba(138, 43, 226, 0.1),
+        inset 0 0 60px rgba(0, 255, 255, 0.05),
+        inset 0 -20px 60px rgba(138, 43, 226, 0.08);
+      animation: mainBubbleFloat 6s ease-in-out infinite, mainBubblePulse 4s ease-in-out infinite;
     }
-    .card {
-      background: rgba(255, 255, 255, 0.15);
-      backdrop-filter: blur(10px);
-      padding: 2.5rem 3.5rem;
-      border-radius: 16px;
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
-      text-align: center;
-      border: 1px solid rgba(255, 255, 255, 0.2);
+
+    .title-bubble::before {
+      content: '';
+      position: absolute;
+      top: 12%;
+      left: 18%;
+      width: 35%;
+      height: 22%;
+      background: radial-gradient(ellipse, rgba(255, 255, 255, 0.2), transparent);
+      border-radius: 50%;
+      transform: rotate(-25deg);
     }
-    h1 {
-      font-size: 3rem;
-      margin: 0 0 0.5rem 0;
+
+    .title-bubble::after {
+      content: '';
+      position: absolute;
+      bottom: 18%;
+      right: 15%;
+      width: 15%;
+      height: 10%;
+      background: radial-gradient(ellipse, rgba(255, 255, 255, 0.08), transparent);
+      border-radius: 50%;
+      transform: rotate(15deg);
     }
-    p {
-      font-size: 1.2rem;
-      margin: 0;
-      opacity: 0.9;
+
+    @keyframes mainBubbleFloat {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-20px); }
+    }
+
+    @keyframes mainBubblePulse {
+      0%, 100% {
+        box-shadow:
+          0 0 60px rgba(0, 255, 255, 0.15),
+          0 0 120px rgba(138, 43, 226, 0.1),
+          inset 0 0 60px rgba(0, 255, 255, 0.05),
+          inset 0 -20px 60px rgba(138, 43, 226, 0.08);
+      }
+      50% {
+        box-shadow:
+          0 0 80px rgba(0, 255, 255, 0.25),
+          0 0 160px rgba(138, 43, 226, 0.18),
+          inset 0 0 80px rgba(0, 255, 255, 0.08),
+          inset 0 -20px 80px rgba(138, 43, 226, 0.12);
+      }
+    }
+
+    .title-ai {
+      font-family: 'Orbitron', monospace;
+      font-size: 4.5rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, #00ffff, #00e5ff, #7c4dff, #e040fb, #00ffff);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: gradientText 4s ease infinite;
+      filter: drop-shadow(0 0 20px rgba(0, 255, 255, 0.4));
+      letter-spacing: 8px;
+      line-height: 1.1;
+    }
+
+    .title-hackers {
+      font-family: 'Orbitron', monospace;
+      font-size: 2.8rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #e040fb, #7c4dff, #00ffff, #00e5ff, #e040fb);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: gradientText 4s ease infinite reverse;
+      filter: drop-shadow(0 0 15px rgba(138, 43, 226, 0.4));
+      letter-spacing: 12px;
+      margin-top: 8px;
+    }
+
+    @keyframes gradientText {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+
+    /* Subtitle */
+    .subtitle {
+      margin-top: 40px;
+      font-size: 1.1rem;
+      color: rgba(255, 255, 255, 0.5);
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      font-weight: 300;
+      animation: fadeInUp 2s ease 0.5s both;
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Orbiting small bubbles around main bubble */
+    .orbit-bubble {
+      position: absolute;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%,
+        rgba(255, 255, 255, 0.2),
+        rgba(0, 255, 255, 0.1) 50%,
+        transparent 100%);
+      border: 1px solid rgba(0, 255, 255, 0.2);
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.15);
+    }
+
+    .orbit-bubble::before {
+      content: '';
+      position: absolute;
+      top: 15%;
+      left: 20%;
+      width: 30%;
+      height: 20%;
+      background: radial-gradient(ellipse, rgba(255, 255, 255, 0.4), transparent);
+      border-radius: 50%;
+      transform: rotate(-30deg);
+    }
+
+    .ob-1 {
+      width: 50px; height: 50px;
+      top: -30px; left: -20px;
+      animation: orbit1 8s ease-in-out infinite;
+    }
+    .ob-2 {
+      width: 35px; height: 35px;
+      top: 50px; right: -40px;
+      animation: orbit2 10s ease-in-out infinite;
+    }
+    .ob-3 {
+      width: 45px; height: 45px;
+      bottom: -20px; left: 30px;
+      animation: orbit3 7s ease-in-out infinite;
+    }
+    .ob-4 {
+      width: 28px; height: 28px;
+      bottom: 60px; right: -25px;
+      animation: orbit4 9s ease-in-out infinite;
+    }
+    .ob-5 {
+      width: 55px; height: 55px;
+      top: 40%; left: -50px;
+      animation: orbit5 11s ease-in-out infinite;
+    }
+
+    @keyframes orbit1 {
+      0%, 100% { transform: translate(0, 0); }
+      25% { transform: translate(15px, -20px); }
+      50% { transform: translate(-10px, -35px); }
+      75% { transform: translate(-20px, -10px); }
+    }
+    @keyframes orbit2 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(20px, 15px) scale(1.1); }
+      66% { transform: translate(-15px, 25px) scale(0.9); }
+    }
+    @keyframes orbit3 {
+      0%, 100% { transform: translate(0, 0); }
+      50% { transform: translate(25px, 15px); }
+    }
+    @keyframes orbit4 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(-20px, -20px) scale(1.2); }
+    }
+    @keyframes orbit5 {
+      0%, 100% { transform: translate(0, 0); }
+      33% { transform: translate(-15px, -25px); }
+      66% { transform: translate(10px, 20px); }
+    }
+
+    /* Particles */
+    .particles-container {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    .particle {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      background: rgba(0, 255, 255, 0.6);
+      border-radius: 50%;
+      box-shadow: 0 0 6px rgba(0, 255, 255, 0.4);
+      animation: sparkle linear infinite;
+    }
+
+    @keyframes sparkle {
+      0% { transform: translateY(0) scale(0); opacity: 0; }
+      20% { opacity: 1; transform: scale(1); }
+      80% { opacity: 0.5; }
+      100% { transform: translateY(-200px) scale(0); opacity: 0; }
+    }
+
+    /* Responsive */
+    @media (max-width: 500px) {
+      .title-bubble {
+        width: 300px;
+        height: 300px;
+        padding: 30px 40px;
+      }
+      .title-ai { font-size: 3rem; letter-spacing: 5px; }
+      .title-hackers { font-size: 1.8rem; letter-spacing: 8px; }
+      .subtitle { font-size: 0.85rem; letter-spacing: 4px; }
+      .ob-5 { display: none; }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Hello, World!</h1>
-    <p>Welcome to your new HTML page.</p>
+
+  <div class="bg"></div>
+  <div class="grid-overlay"></div>
+
+  <!-- Background floating bubbles -->
+  <div class="bubbles-container" id="bubbles"></div>
+
+  <!-- Particles -->
+  <div class="particles-container" id="particles"></div>
+
+  <!-- Main Content -->
+  <div class="content">
+    <div class="title-bubble">
+      <!-- Orbiting mini bubbles -->
+      <div class="orbit-bubble ob-1"></div>
+      <div class="orbit-bubble ob-2"></div>
+      <div class="orbit-bubble ob-3"></div>
+      <div class="orbit-bubble ob-4"></div>
+      <div class="orbit-bubble ob-5"></div>
+
+      <div class="title-ai">AI</div>
+      <div class="title-hackers">HACKERS</div>
+    </div>
+    <p class="subtitle">⚡ Code the Future ⚡</p>
   </div>
+
+  <script>
+    // Generate background bubbles
+    const bubblesContainer = document.getElementById('bubbles');
+    function createBubble() {
+      const bubble = document.createElement('div');
+      bubble.classList.add('bubble');
+      const size = Math.random() * 80 + 20;
+      bubble.style.width = size + 'px';
+      bubble.style.height = size + 'px';
+      bubble.style.left = Math.random() * 100 + '%';
+      bubble.style.animationDuration = (Math.random() * 15 + 10) + 's';
+      bubble.style.animationDelay = (Math.random() * 10) + 's';
+      bubblesContainer.appendChild(bubble);
+      // Remove after animation
+      setTimeout(() => bubble.remove(), 25000);
+    }
+    // Initial batch
+    for (let i = 0; i < 15; i++) {
+      setTimeout(createBubble, i * 600);
+    }
+    // Continuously create bubbles
+    setInterval(createBubble, 1800);
+
+    // Generate particles
+    const particlesContainer = document.getElementById('particles');
+    function createParticle() {
+      const particle = document.createElement('div');
+      particle.classList.add('particle');
+      particle.style.left = Math.random() * 100 + '%';
+      particle.style.top = Math.random() * 100 + '%';
+      particle.style.animationDuration = (Math.random() * 3 + 2) + 's';
+      particle.style.animationDelay = (Math.random() * 2) + 's';
+      const colors = [
+        'rgba(0, 255, 255, 0.6)',
+        'rgba(138, 43, 226, 0.6)',
+        'rgba(224, 64, 251, 0.5)',
+        'rgba(124, 77, 255, 0.5)'
+      ];
+      particle.style.background = colors[Math.floor(Math.random() * colors.length)];
+      particlesContainer.appendChild(particle);
+      setTimeout(() => particle.remove(), 5000);
+    }
+    for (let i = 0; i < 30; i++) {
+      setTimeout(createParticle, i * 200);
+    }
+    setInterval(createParticle, 400);
+
+    // Mouse-follow glow effect
+    document.addEventListener('mousemove', (e) => {
+      const glow = document.createElement('div');
+      glow.style.cssText = `
+        position: fixed;
+        left: ${e.clientX - 50}px;
+        top: ${e.clientY - 50}px;
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0,255,255,0.08), transparent 70%);
+        pointer-events: none;
+        z-index: 4;
+        transition: opacity 1s;
+      `;
+      document.body.appendChild(glow);
+      setTimeout(() => { glow.style.opacity = '0'; }, 100);
+      setTimeout(() => glow.remove(), 1100);
+    });
+  </script>
 </body>
 </html>
