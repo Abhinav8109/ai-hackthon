@@ -149,9 +149,77 @@ def test_reset_functionality():
     print("✓ Reset verified cleanly.")
 
 
+def test_admin_pipeline_and_roles():
+    print("\nTesting Admin Talent Pipeline & Role Buckets...")
+    from pipeline_manager import get_all_roles, get_candidates, get_candidate_by_id
+
+    roles = get_all_roles()
+    assert len(roles) >= 5, f"Expected at least 5 roles, found {len(roles)}"
+    assert "Software Engineer" in roles
+    assert "DevOps Engineer" in roles
+    assert "AI/ML Engineer" in roles
+
+    # Verify candidates are bucketed
+    all_cands = get_candidates()
+    assert len(all_cands) >= 5, "Expected at least 5 candidates"
+
+    # Verify Sukrit exists under Software Engineer
+    sukrit = get_candidate_by_id("CAND-SE-8109")
+    assert sukrit is not None
+    assert sukrit.name == "Sukrit Sharma"
+    assert sukrit.email == "sukrit.ss.31@gmail.com"
+    assert sukrit.role == "Software Engineer"
+    assert sukrit.match_score >= 90
+    print(f"✓ Verified 5 Role Buckets and Sukrit Sharma profile under Software Engineer.")
+
+
+def test_approval_and_email_dispatch():
+    print("\nTesting Candidate Approval & Email Dispatch...")
+    from pipeline_manager import approve_candidate, get_candidate_by_id
+    from notification_service import get_dispatch_logs
+
+    res = approve_candidate("CAND-SE-8109")
+    assert res["status"] == "success"
+    assert res["access_id"] == "CAND-SE-8109"
+    assert res["access_code"].startswith("PILOT-")
+
+    cand = get_candidate_by_id("CAND-SE-8109")
+    assert cand.status == "Approved (Invitation Sent)"
+    assert cand.access_code is not None
+
+    logs = get_dispatch_logs()
+    assert len(logs) > 0
+    latest_log = logs[-1]
+    assert latest_log["recipient_email"] == "sukrit.ss.31@gmail.com"
+    assert latest_log["access_id"] == "CAND-SE-8109"
+    assert latest_log["access_code"] == cand.access_code
+    print(f"✓ Approved Sukrit Sharma; generated {cand.access_id} and {cand.access_code}; email dispatched to {latest_log['recipient_email']}.")
+
+
+def test_candidate_authentication_gateway():
+    print("\nTesting Candidate Authentication Gateway...")
+    from pipeline_manager import authenticate_candidate, get_candidate_by_id
+
+    cand = get_candidate_by_id("CAND-SE-8109")
+    # Valid login with ID and passcode
+    auth_success = authenticate_candidate(cand.id, cand.access_code)
+    assert auth_success is not None
+    assert auth_success.name == "Sukrit Sharma"
+
+    # Valid login with Gmail address and passcode
+    auth_email = authenticate_candidate("sukrit.ss.31@gmail.com", cand.access_code)
+    assert auth_email is not None
+    assert auth_email.name == "Sukrit Sharma"
+
+    # Invalid passcode rejection
+    auth_fail = authenticate_candidate("CAND-SE-8109", "WRONG-PASS")
+    assert auth_fail is None
+    print(f"✓ Authentication Gateway verified: correctly authenticates with ID/Gmail and rejects invalid codes.")
+
+
 if __name__ == "__main__":
     print("==================================================")
-    print("   RUNNING INTERVIEWPILOT AI VALIDATION SUITE    ")
+    print("   RUNNING TALENTPILOT AI VALIDATION SUITE       ")
     print("==================================================")
     test_resume_parser()
     test_agent_planning()
@@ -159,6 +227,10 @@ if __name__ == "__main__":
     test_followup_resolution_and_advancement()
     test_full_interview_simulation_and_report()
     test_reset_functionality()
+    test_admin_pipeline_and_roles()
+    test_approval_and_email_dispatch()
+    test_candidate_authentication_gateway()
     print("\n==================================================")
     print("   ALL TESTS PASSED WITH 100% SUCCESS RATE!       ")
     print("==================================================")
+

@@ -1,6 +1,6 @@
 # 🏆 Talent Pilot AI — Executive Client Pitch & Demonstration Guide
-## Use Case 4: AI First-Round Screening Interviewer (Agentic)
-**Product:** InterviewPilot AI  
+## End-to-End Enterprise Screening Pipeline: Recruiter Admin Portal to Protected Candidate Interview
+**Product:** TalentPilot AI (InterviewPilot AI)  
 **Audience:** Enterprise Clients, Hiring Executives, Hackathon Judging Panel  
 **Presenters:** Abhinav & Engineering Team  
 
@@ -8,116 +8,73 @@
 
 ## 🎯 1. The Executive Problem & Market Need
 
-In modern enterprise hiring, **first-round technical screening** is broken:
-- **Costly Senior Engineer Distraction:** Engineering managers and senior staff spend 15–20 hours per week screening candidates, pulling them away from core product development.
-- **Inconsistent Quality & Subjectivity:** Different human interviewers evaluate candidates against divergent standards, leading to biased or ungrounded hiring decisions.
-- **Resume Embellishment Gaps:** Resumes claim production experience with technologies (e.g., Kubernetes, LLMs, distributed caching) that candidates cannot explain when probed.
-- **Candidate Frustration:** Candidates face impersonal, rigid questionnaires that fail to adapt to their actual experience.
+In modern enterprise hiring, the transition from **resume shortlisting** to **technical screening** is riddled with friction:
+- **Disorganized Sourcing Across Roles:** Recruiters manage 5+ roles simultaneously (Software Engineer, DevOps, AI/ML, Frontend, Cloud/Data) with disjointed spreadsheets.
+- **Manual Candidate Coordination:** Generating credentials, writing invitation emails, and coordinating screening links manually wastes dozens of hours per week.
+- **Unverified Candidate Identity:** Traditional screening links are shared or unauthenticated, compromising evaluation integrity.
+- **Static First-Round Interviews:** Candidates face generic questionnaires that fail to adapt to their real-world experience.
 
 ---
 
-## 💡 2. The Solution: InterviewPilot AI
+## 💡 2. The Solution: TalentPilot AI End-to-End Pipeline
 
-**InterviewPilot AI** is an **autonomous, agentic technical screening interviewer** that replaces static forms with an intelligent, adaptive interview experience.
+**TalentPilot AI** provides an autonomous, closed-loop hiring pipeline:
 
-### 🔑 Core Capabilities
+```
+[ 1. Recruiter Admin Portal ] ──► [ 2. AI Sourcing & Role Bucketing ] ──► [ 3. Recruiter Approval ]
+                                                                                   │
+                                                                                   ▼
+[ 6. Recruiter Scorecard Audit ] ◄── [ 5. Protected AI Interview ] ◄── [ 4. Gmail Invitation ]
+```
 
-| Capability | How It Works | Business Value |
+### 🔑 End-to-End Feature Matrix
+
+| Stage | Feature | Implementation & Business Impact |
 | :--- | :--- | :--- |
-| **Resume-Aware Probing** | Dynamically anchors questions to specific achievements and metrics in the candidate's resume. | Proves candidate actually did the work claimed on their CV. |
-| **Adaptive Follow-up Engine** | Automatically detects shallow answers (<60% completeness) and asks targeted follow-ups before scoring. | Separates buzzword-droppers from true technical practitioners. |
-| **Verbatim Evidence Anchoring** | Every score (1–5) must quote the candidate's exact words. No hallucinations. | Provides an objective, auditable trail for compliance and hiring committees. |
-| **Inconsistency Detector** | Flags discrepancies neutrally as *"Needs Clarification"* for the Round-2 interviewer. | Prevents unqualified hires from slipping through the pipeline. |
-| **Human-in-the-Loop Safeguards** | The agent **never auto-rejects**. It categorizes candidates for recruiter review. | Ensures ethical AI compliance and eliminates legal risk. |
+| **1. Admin Portal** | **Multi-Role Sourcing Buckets** | Categorizes candidates across 5 roles: `Software Engineer`, `DevOps Engineer`, `AI/ML Engineer`, `Frontend Engineer`, `Cloud & Data Engineer` with AI match scores (e.g. 96%). |
+| **2. Recruiter Approval** | **1-Click Candidate Approval** | Admin reviews candidate match cards and clicks **Approve & Send Gmail**. |
+| **3. Automated Notification** | **Gmail Dispatch Service** | Dispatches a formatted invitation to the candidate's Gmail (e.g., `sukrit.ss.31@gmail.com`) with unique **Access ID** and **One-Time Passcode**. |
+| **4. Candidate Gateway** | **ID & Passcode Authentication** | Candidate clicks link, enters credentials from their email, and accesses their personalized screening room. |
+| **5. Screening Interview** | **Resume-Aware Adaptive Agent** | Formulates 5 questions anchored to candidate's CV; detects shallow answers and triggers real-time follow-up probes. |
+| **6. Audit & Scorecard** | **Recruiter Audit Dashboard** | Displays overall rating, Plotly competency radar chart, verbatim evidence quotes, and consistency matrix. |
 
 ---
 
-## 🔬 3. System Architecture & Agentic Flow
+## 🎤 3. Live Client Demonstration Script (3-Minute Walkthrough)
 
-```
-+----------------------------------------------------------------------------------+
-|                           INTERVIEWPILOT AGENTIC LOOP                            |
-+----------------------------------------------------------------------------------+
-                                        │
-                                        ▼
-                           [ Candidate Resume & JD ]
-                                        │
-                                        ▼
-                          [ Planner Agent Synthesis ]
-                                        │
-                       ┌────────────────┴────────────────┐
-                       ▼                                 ▼
-             (Targeted Resume Claim)             (JD Technical Stack)
-                       └────────────────┬────────────────┘
-                                        │
-                                        ▼
-                            [ Q&A Interaction Turn ]
-                                        │
-                                        ▼
-                  ┌───────────────────────────────────────────┐
-                  │           REAL PYTHON TOOL CALLS          │
-                  │  1. search_resume_claims()                │
-                  │  2. evaluate_answer()                     │
-                  │  3. validate_score_evidence()             │
-                  │  4. check_competency_coverage()           │
-                  └─────────────────────┬─────────────────────┘
-                                        │
-                                        ▼
-                     Is Candidate Answer Shallow (<60%)?
-                                   /         \
-                             YES  /           \  NO
-                                 ▼             ▼
-             [ Trigger Follow-up Probe ]    [ Advance Question & ]
-             [ & Await Candidate Depth ]    [ Step Up Difficulty ]
-                                 \             /
-                                  \           /
-                                   ▼         ▼
-                           [ All Questions Completed? ]
-                                        │
-                                      YES
-                                        │
-                                        ▼
-                             [ detect_consistency() ]
-                                        │
-                                        ▼
-                    [ Final Audit Scorecard & Recruiter Guide ]
-```
+Follow this exact talk-track for client demos and judging presentations:
+
+### Step 1: Recruiter Admin Portal & Role Bucketing (45 seconds)
+> *"Welcome everyone. Today we are demonstrating TalentPilot AI—a complete autonomous screening pipeline from candidate shortlisting to protected AI interview.*
+> *Notice our modern dark navy Recruiter Dashboard. We have 5 active recruiting roles. When we select the **'Software Engineer'** role bucket, our Agentic Sourcing AI has shortlisted **Sukrit Sharma** (`sukrit.ss.31@gmail.com`) with a **96% Match Score** based on his FastAPI, Redis caching, and distributed systems background."*
+
+### Step 2: Candidate Approval & Automated Gmail Dispatch (45 seconds)
+> *"Now, the recruiter reviews Sukrit's profile and clicks **'✅ Approve & Send Gmail to Sukrit'**.*
+> *In real time:*
+> *1. The system generates unique credentials: Access ID `CAND-SE-8109` and Passcode `PILOT-XXXX`.*
+> *2. The Notification Service dispatches the official invitation email directly to `sukrit.ss.31@gmail.com`.*
+> *Let's switch to our **'Live Email Dispatch Terminal'** tab to inspect the exact outgoing email with credentials and direct screening link."*
+
+### Step 3: Candidate Gateway Login & Authentication (30 seconds)
+> *"Now we step into Sukrit's shoes. Sukrit receives the email, clicks the interview link, and lands on the **Candidate Interview Gateway**.*
+> *The room is protected: Sukrit enters his Access ID and Passcode from the email.*
+> *With our 1-click presenter button, we authenticate Sukrit instantly and enter the screening room."*
+
+### Step 4: Resume-Aware Probing & Adaptive Follow-up (45 seconds)
+> *"Notice that Question 1 is not generic—it probes Sukrit's exact resume claim: 'high-throughput FastAPI microservices handling 20,000 req/sec'.*
+> *Now let's test a shallow answer: We click **'⚠️ Test Shallow Answer'**.*
+> *Look at the Live Agent Activity Panel: `evaluate_answer()` detected low completeness (40%). The agent intercepts the turn and triggers a targeted follow-up probe demanding trade-offs.*
+> *When Sukrit provides a deep architectural answer, the agent rewards the recovery with a 5/5 and advances."*
+
+### Step 5: Recruiter Scorecard & Audit (15 seconds)
+> *"At completion, Sukrit's scorecard is automatically submitted back to the Recruiter Dashboard with our Plotly Competency Radar, evidence quotes, and recruiter recommendations."*
 
 ---
 
-## 🎤 4. Live Demonstration Script (Step-by-Step Talk-Track)
-
-Use this exact 3-minute talk-track to present the agent live to clients:
-
-### Step 1: Open Dashboard & Load Demo (30 seconds)
-> *"Hello everyone. Today we are presenting InterviewPilot AI for Use Case 4: The Agentic Technical Screening Interviewer. Notice our modern dark navy SaaS interface. With one click on **'⚡ Load 1-Click Synthetic Demo'**, our system parses the candidate's resume—Alex Chen, a Senior AI Engineer—extracting 12 verifiable claims."*
-
-### Step 2: Formulate Resume-Anchored Plan (30 seconds)
-> *"Now we click **'🚀 Synthesize Agentic Interview Plan'**. Notice that our questions are not pulled from a generic question bank. Question 1 targets Alex's exact resume claim: 'reducing end-to-end RAG query latency from 1.8s to 240ms'. The agent demands to know the architectural trade-offs and profiling metrics behind that exact achievement."*
-
-### Step 3: Demonstrate Adaptive Follow-up Probe (60 seconds)
-> *"Now, let's test what happens if a candidate gives a shallow, vague answer. We click **'⚠️ Test Shallow Answer'**, where the candidate says: 'I used Redis to cache things. It made the system faster and reduced database load.'*
-> *Notice what happens in real time in our **Agent Activity Panel**:*
-> *1. `evaluate_answer()` ran in 8ms and calculated only 40% completeness.*
-> *2. The agent intercepted the turn, holding the score, and triggered a targeted follow-up probe: 'What key trade-offs, potential failure points, or performance bottlenecks did you consider with this approach?'*
-> *Now, when the candidate provides a strong follow-up detailing distributed mutex locks and latency numbers, the agent rewards the recovery, updates the score to 5/5, and advances to Question 2."*
-
-### Step 4: Final Scorecard & Recruiter Value (60 seconds)
-> *"Finally, let's examine the **Final Scorecard & Audit** dashboard:*
-> *• We see a Weighted Score of 4.2 / 5.0 with our recommendation: **ADVANCE TO TECHNICAL ROUND**.*
-> *• Notice our prominent **Human Oversight Safeguard banner**—we never auto-reject.*
-> *• The interactive **Plotly Competency Radar Chart** benchmarks the candidate against our 4.0 target across all 5 competencies.*
-> *• The **Resume Consistency Matrix** categorizes every claim as Supported or Needs Clarification.*
-> *• And with one click, the recruiter can download the complete audit scorecard or copy the candidate feedback note."*
+## 🛡️ 4. Enterprise Compliance & Ethical AI
+- **Strict Human Oversight:** The AI provides decision support; no automated rejection is permitted.
+- **Verbatim Evidence Grounding:** No hallucinated scores—every rating is backed by candidate quotes.
+- **Full Credential Audit:** Secure, one-time passcode prevents unauthorized interview attempts.
 
 ---
-
-## 📊 5. Measurable ROI for Enterprise Clients
-
-1. **70% Reduction in Technical Interview Hours:** Senior engineers only interview pre-screened candidates who have demonstrated technical depth.
-2. **Zero Recruiter Bias:** Standardized 1–5 rubrics with required verbatim quote evidence eliminate gut-feeling decisions.
-3. **Audit Compliance:** Complete tool execution logs provide defensible hiring records.
-4. **Instant Scalability:** Screens 1,000 candidates simultaneously without recruiter burnout.
-
----
-*InterviewPilot AI — Empowering Talent Teams with Autonomous, Ethical Screening.*
+*TalentPilot AI — Autonomous, Secure, and Evidence-Backed Screening.*
