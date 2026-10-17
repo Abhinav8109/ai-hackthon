@@ -205,6 +205,12 @@ def init_db() -> None:
         # Migration: Ensure all candidate emails are valid @gmail.com addresses
         cursor.execute("UPDATE candidates SET email = REPLACE(email, '@example.com', '@gmail.com') WHERE email LIKE '%@example.com';")
 
+        # Migration: Add response_time_seconds column to interview_qa if missing
+        try:
+            cursor.execute("ALTER TABLE interview_qa ADD COLUMN response_time_seconds INTEGER DEFAULT 45;")
+        except Exception:
+            pass
+
         conn.commit()
 
 

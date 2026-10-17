@@ -120,7 +120,7 @@ def approve_for_first_round(candidate_id: str, reviewer: str = "Admin") -> Dict[
     # 2. Generate 8-10 Question Interview Plan (Planner Agent)
     parsed_resume = parse_resume(cand["resume_text"])
     agent = InterviewPilotAgent()
-    questions = agent.plan_interview(parsed_resume, job["description"])
+    questions = agent.plan_interview(parsed_resume, job["description"], job["title"])
     questions_dicts = [q.model_dump() for q in questions]
 
     plan_id = f"PLAN-{secrets.token_hex(6).upper()}"
@@ -281,7 +281,8 @@ def record_turn_answer(
     evidence_quote: str,
     rubric_match: str,
     strengths: str,
-    gaps: Optional[str]
+    gaps: Optional[str],
+    response_time_seconds: int = 45
 ) -> None:
     """Saves candidate answer turn to database and updates progress."""
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -290,12 +291,12 @@ def record_turn_answer(
         INSERT INTO interview_qa (
             session_id, question_id, competency, difficulty, question_text, targeted_claim,
             candidate_answer, followup_question, followup_answer, score, completeness,
-            evidence_quote, rubric_match, strengths, gaps, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            evidence_quote, rubric_match, strengths, gaps, response_time_seconds, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             session_id, question_id, competency, difficulty, question_text, targeted_claim,
             candidate_answer, followup_question, followup_answer, score, completeness,
-            evidence_quote, rubric_match, strengths, gaps, now_iso
+            evidence_quote, rubric_match, strengths, gaps, response_time_seconds, now_iso
         ))
 
         conn.execute(

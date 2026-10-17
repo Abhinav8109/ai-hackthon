@@ -189,88 +189,166 @@ def evaluate_answer(
 ) -> EvaluationResult:
     """
     Evaluates candidate answer against scoring rubric on a 1-5 scale.
-    Calculates completeness, extracts direct quote evidence, and determines
-    if a follow-up probe is required.
+    Performs multi-dimensional semantic analysis:
+    1. Question Subject Relevance (prevents off-topic / gibberish high scores)
+    2. Multi-Role Technical Depth (across Backend, DevOps/SRE, AI/ML, Frontend, Data)
+    3. Architectural Trade-offs & Quantitative Metrics
+    4. Structured Procedural Methodology
+    Calculates completeness, extracts verbatim supporting quotes, and dynamically decides follow-up probes.
     """
     start_t = time.perf_counter()
     answer_clean = candidate_answer.strip()
     word_count = len(answer_clean.split())
     answer_lower = answer_clean.lower()
+    q_lower = question_text.lower()
 
-    # Domain keywords detection
+    # Multi-Role Enterprise Technical Lexicon
     technical_vocab = [
-        "fastapi", "python", "pydantic", "asyncio", "concurrency", "postgres", "postgresql",
-        "redis", "cache", "caching", "docker", "kubernetes", "k8s", "cluster", "pod", "restart",
-        "latency", "throughput", "index", "query", "orm", "sqlalchemy", "rag", "embedding",
-        "vector", "prompt", "chunking", "rate limit", "token", "jwt", "auth", "middleware",
-        "rollback", "ci/cd", "pipeline", "distributed", "microservices", "memory leak", "cpu"
+        # Backend & Distributed Systems
+        "fastapi", "django", "flask", "python", "pydantic", "asyncio", "event loop", "concurrency",
+        "threading", "multiprocessing", "gil", "postgres", "postgresql", "redis", "cache", "caching",
+        "stale-while-revalidate", "mutex", "distributed lock", "redlock", "connection pool", "pgbouncer",
+        "deadlock", "isolation level", "acid", "microservices", "rest", "grpc", "circuit breaker",
+        "idempotency", "saga", "distributed transaction", "read replica",
+        # Cloud, DevOps & SRE
+        "docker", "kubernetes", "k8s", "cluster", "pod", "ingress", "daemonset", "helm", "terraform",
+        "aws", "eks", "ecs", "gcp", "azure", "prometheus", "grafana", "canary", "blue-green",
+        "rollback", "ci/cd", "pipeline", "hpa", "autoscaling", "service mesh", "istio", "p99",
+        "latency", "throughput", "uptime", "sli", "slo", "sla", "chaos engineering", "oom", "crashloopbackoff",
+        # AI, ML & RAG Systems
+        "rag", "retrieval", "embedding", "vector", "vector db", "vectordb", "chromadb", "pinecone",
+        "qdrant", "faiss", "hnsw", "cosine similarity", "langchain", "llamaindex", "prompt",
+        "chunking", "fine-tuning", "lora", "qlora", "gpu", "cuda", "inference", "hallucination",
+        "context window", "attention", "transformer", "llm", "quantization", "tensorrt", "vllm",
+        # Frontend Architecture & Performance
+        "react", "next.js", "nextjs", "typescript", "redux", "zustand", "context api", "ssr", "ssg",
+        "isr", "hydration", "web vitals", "lcp", "cls", "inp", "fid", "tree-shaking", "bundle",
+        "webpack", "vite", "tailwind", "accessibility", "a11y", "wcag", "dom", "virtual dom",
+        # Data Platform & Streaming
+        "kafka", "spark", "pyspark", "airflow", "dag", "snowflake", "dbt", "etl", "elt",
+        "lakehouse", "parquet", "partitioning", "clustering", "shuffle", "skew", "consumer group",
+        "offset", "dead letter queue", "backpressure"
     ]
+
     detected_tech = [t for t in technical_vocab if re.search(r"\b" + re.escape(t) + r"\b", answer_lower)]
 
-    # Metrics detection (percentages, time, throughput numbers)
-    has_metrics = bool(re.search(r"\b\d+[\%ms|s|sec|rps|k|mb|gb]?\b", answer_lower))
-    has_tradeoff_words = any(w in answer_lower for w in ["tradeoff", "because", "instead of", "however", "bottleneck", "alternatively", "mitigate", "compromise"])
-    has_structure = any(w in answer_lower for w in ["first", "second", "initially", "then", "finally", "root cause", "monitored"])
+    # 1. Question Subject Relevance Analysis
+    # Extract substantive nouns and keywords from the question
+    stopwords = {"what", "when", "where", "which", "while", "would", "could", "should", "your", "their", "about", "with", "from", "have", "been", "explain", "describe", "suppose", "imagine", "walk", "step", "tell"}
+    q_words = [w for w in re.findall(r"\b[a-zA-Z]{4,}\b", q_lower) if w not in stopwords]
+    relevant_overlap = [w for w in q_words if w in answer_lower]
+    relevance_ratio = len(relevant_overlap) / max(1, min(len(q_words), 5))
 
-    # Completeness calculation (0.0 to 1.0)
-    # Shallow answers: < 20 words or lacking trade-offs/metrics under 65 words
-    if word_count < 15:
-        completeness = 0.25
+    # 2. Metrics detection (percentages, latencies, capacities, throughput)
+    has_metrics = bool(re.search(r"\b\d+(\.\d+)?(\s*[\%]|ms|s|sec|rps|k|mb|gb|req/s|qps|x)\b", answer_lower))
+
+    # 3. Trade-off indicators
+    tradeoff_keywords = [
+        "tradeoff", "trade-off", "because", "instead of", "versus", "vs", "however", "bottleneck",
+        "alternatively", "mitigate", "compromise", "overhead", "latency vs", "cost vs", "consistency vs",
+        "downside", "stale-while-revalidate", "mutex", "fallback"
+    ]
+    has_tradeoff_words = any(w in answer_lower for w in tradeoff_keywords)
+
+    # 4. Procedural & Troubleshooting structure
+    structure_keywords = [
+        "first", "second", "initially", "then", "finally", "root cause", "isolate", "verify",
+        "metric", "dashboard", "reproduce", "rollback", "post-mortem", "star", "action", "outcome"
+    ]
+    has_structure = any(w in answer_lower for w in structure_keywords)
+
+    # 5. Evasive / Non-answer detection
+    evasive_phrases = ["don't know", "dont know", "not sure", "no idea", "never used", "can't answer", "skip", "n/a", "i am good", "no experience"]
+    is_evasive = any(p in answer_lower for p in evasive_phrases) and len(detected_tech) == 0
+
+    # Multi-factor scoring logic
+    if word_count < 10 or is_evasive or (word_count < 25 and len(detected_tech) == 0 and len(relevant_overlap) == 0):
+        completeness = 0.20
         score = 1
-        rubric_match = RUBRIC[competency].get(1, "Incomplete or shallow")
-        gaps = "Response is extremely brief and provides no architectural or procedural details."
+        rubric_match = RUBRIC[competency].get(1, "Incomplete, superficial or non-responsive")
+        gaps = "Response is non-responsive or lacks foundational technical explanations and mechanisms."
         needs_followup = True
-    elif word_count < 35 and not (has_tradeoff_words or has_metrics):
+
+    elif word_count < 30 and len(detected_tech) <= 1 and not (has_tradeoff_words or has_metrics):
         completeness = 0.40
         score = 2
         rubric_match = RUBRIC[competency].get(2, "Superficial explanation")
-        gaps = "Answer lacks concrete technical mechanisms, quantitative metrics, or implementation trade-offs."
+        gaps = "Response mentions basic terminology but lacks concrete implementation details, architectural trade-offs, or quantifiable metrics."
         needs_followup = True
-    elif word_count < 60 and not (has_tradeoff_words or has_metrics):
-        completeness = 0.55
-        score = 3
-        rubric_match = RUBRIC[competency].get(3, "Good high level overview")
-        gaps = "Mentions high-level concepts but does not elaborate on trade-offs or production failure modes."
-        needs_followup = True
-    else:
-        # Sufficient to advanced answers
+
+    elif (len(detected_tech) < 2 and not (has_tradeoff_words or has_metrics)) or word_count < 55:
+        # Check if answer shows strong technical keywords despite moderate length
         if len(detected_tech) >= 3 and (has_tradeoff_words or has_metrics):
             completeness = 0.95
             score = 5
             rubric_match = RUBRIC[competency].get(5, "Deep production mastery")
             gaps = None
             needs_followup = False
-        else:
-            completeness = 0.80
+        elif len(detected_tech) >= 2 and (has_tradeoff_words or has_metrics):
+            completeness = 0.85
             score = 4
             rubric_match = RUBRIC[competency].get(4, "Clear technical understanding")
             gaps = None
             needs_followup = False
+        else:
+            completeness = 0.55
+            score = 3
+            rubric_match = RUBRIC[competency].get(3, "Good high level overview")
+            gaps = "Demonstrates foundational familiarity, but lacks deep analysis of production failure modes, concurrency, or quantitative benchmarks."
+            needs_followup = True
 
-    # Extract exact supporting quote (no hallucination)
+    else:
+        # Substantive responses (55+ words or highly technical)
+        if len(detected_tech) >= 3 and has_tradeoff_words and has_metrics:
+            completeness = 0.98
+            score = 5
+            rubric_match = RUBRIC[competency].get(5, "Deep production mastery")
+            gaps = None
+            needs_followup = False
+        elif len(detected_tech) >= 2 and (has_tradeoff_words or has_metrics or has_structure):
+            completeness = 0.88
+            score = 4
+            rubric_match = RUBRIC[competency].get(4, "Clear technical understanding")
+            gaps = None
+            needs_followup = False
+        else:
+            completeness = 0.65
+            score = 3
+            rubric_match = RUBRIC[competency].get(3, "Good high level overview")
+            gaps = "Articulates general architecture, but would benefit from explicit discussion of production bottlenecks and metrics."
+            needs_followup = True
+
+    # Extract exact verbatim supporting quote (no hallucination)
     sentences = [s.strip() for s in re.split(r"[.!?]\n?", answer_clean) if len(s.strip()) > 8]
     if sentences:
-        # Pick the sentence with the most technical keywords or the first substantive sentence
         best_sentence = max(sentences, key=lambda s: sum(1 for kw in detected_tech if kw in s.lower()), default=sentences[0])
         evidence_quote = f'"{best_sentence}"'
     else:
         evidence_quote = f'"{answer_clean[:120]}"'
 
-    # Suggested follow-up prompt if needed
+    # Intelligent, context-aware follow-up probe formulation
     suggested_followup = None
     if needs_followup:
         if len(detected_tech) == 0:
             suggested_followup = f"Could you walk me through the specific technical tools, libraries, and architecture you would use to implement this in production?"
         elif not has_tradeoff_words:
             suggested_followup = f"What key trade-offs, potential failure points, or performance bottlenecks did you consider with this approach?"
+        elif not has_metrics:
+            suggested_followup = f"Could you provide a concrete example showing how you measured or verified the outcome (e.g. latency, throughput, error rate)?"
         else:
-            suggested_followup = f"Could you provide a concrete example from your past work showing how you measured or verified the outcome?"
+            suggested_followup = f"What specific metrics dashboards, logs, or diagnostic commands would you inspect first to confirm the root cause before taking action?"
 
-    strengths = f"Candidate referenced {', '.join(detected_tech[:4])}." if detected_tech else "Candidate articulated the basic concept."
+    # Rich strengths synthesis
+    strength_items = []
+    if detected_tech:
+        strength_items.append(f"Demonstrated command of {', '.join(detected_tech[:4])}")
     if has_metrics:
-        strengths += " Included quantifiable metrics or thresholds."
+        strength_items.append("Provided concrete quantifiable metrics or performance thresholds")
     if has_tradeoff_words:
-        strengths += " Highlighted architectural trade-offs."
+        strength_items.append("Analyzed architectural trade-offs and alternatives")
+    if has_structure:
+        strength_items.append("Employed structured troubleshooting/methodology")
+    strengths = ". ".join(strength_items) + "." if strength_items else "Candidate articulated the high-level concept."
 
     res = EvaluationResult(
         competency=competency,

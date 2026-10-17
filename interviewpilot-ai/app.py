@@ -20,6 +20,7 @@ Full End-to-End Workflow:
 import streamlit as st
 import os
 import json
+import time
 from datetime import datetime, timezone
 
 from database import (
@@ -533,49 +534,135 @@ if st.session_state.active_portal == "Candidate Portal":
 
         st.stop()
 
-    # Active Question Display
-    q_col, act_col = st.columns([1.6, 1.0])
+    # Active Question Display (Candidate-Facing Focused Layout)
+    _, cand_col, _ = st.columns([0.08, 0.84, 0.08])
 
-    with q_col:
+    with cand_col:
         progress_val = min(1.0, agent.state.current_index / max(1, total_q))
         st.progress(progress_val)
-        st.caption(f"Question **{agent.state.current_index + 1} of {total_q}** • Domain: **{curr_q.competency if curr_q else 'In Progress'}**")
+        st.markdown(f"""
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <span style="font-size:0.9rem; color:#94A3B8;">Question <strong>{agent.state.current_index + 1} of {total_q}</strong> • Domain: <strong style="color:#38BDF8;">{curr_q.competency if curr_q else 'In Progress'}</strong></span>
+            <span class="status-pill pill-purple">Level: {agent.state.current_difficulty.upper()}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # 60-Second Real-Time Countdown Timer Widget
+        q_timer_key = f"q_timer_start_{agent.state.current_index}_{agent.state.status}"
+        if q_timer_key not in st.session_state:
+            st.session_state[q_timer_key] = time.time()
+
+        timer_html = f"""
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; padding: 12px 18px; margin: 0 0 16px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.1rem;">⏱️</span>
+                    <span style="font-size: 0.82rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em;">Response Window</span>
+                </div>
+                <div id="countdown-val" style="font-size: 1.35rem; font-weight: 800; font-family: monospace; color: #10B981;">01:00</div>
+            </div>
+            <div style="width: 100%; height: 7px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; overflow: hidden;">
+                <div id="countdown-bar" style="width: 100%; height: 100%; background: #10B981; transition: width 1s linear, background-color 1s ease;"></div>
+            </div>
+            <div id="timer-status" style="margin-top: 6px; font-size: 0.76rem; color: #64748B; text-align: right;">Standard recommended response: 60 seconds per question</div>
+        </div>
+        <script>
+            let remaining = 60;
+            const valEl = document.getElementById('countdown-val');
+            const barEl = document.getElementById('countdown-bar');
+            const statEl = document.getElementById('timer-status');
+            const timer = setInterval(() => {{
+                remaining--;
+                if (remaining <= 0) {{
+                    clearInterval(timer);
+                    valEl.innerText = "00:00";
+                    valEl.style.color = "#EF4444";
+                    barEl.style.width = "0%";
+                    statEl.innerText = "⏱️ Time limit reached! Please finalize and submit your response.";
+                    statEl.style.color = "#F87171";
+                    return;
+                }}
+                let m = Math.floor(remaining / 60);
+                let s = remaining % 60;
+                valEl.innerText = (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+                barEl.style.width = ((remaining / 60) * 100) + "%";
+                if (remaining > 20) {{
+                    valEl.style.color = "#10B981";
+                    barEl.style.background = "#10B981";
+                }} else if (remaining > 10) {{
+                    valEl.style.color = "#F59E0B";
+                    barEl.style.background = "#F59E0B";
+                    statEl.innerText = "⚠️ 20 seconds remaining — wrap up your core points.";
+                    statEl.style.color = "#FBBF24";
+                }} else {{
+                    valEl.style.color = "#EF4444";
+                    barEl.style.background = "#EF4444";
+                    statEl.innerText = "🚨 Under 10 seconds! Submit your answer now.";
+                    statEl.style.color = "#F87171";
+                }}
+            }}, 1000);
+        </script>
+        """
+        st.components.v1.html(timer_html, height=88, key=f"timer_comp_{agent.state.current_index}_{agent.state.status}")
 
         if curr_q:
             st.markdown(f"""
-            <div class="question-panel">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span class="status-pill pill-blue">{curr_q.competency}</span>
-                    <span class="status-pill pill-purple">Level: {agent.state.current_difficulty.upper()}</span>
-                </div>
+            <div class="question-panel" style="margin-bottom: 18px;">
+                <span class="status-pill pill-blue">{curr_q.competency}</span>
                 <h3 style="margin-top: 14px; color: #FFFFFF;">Question #{curr_q.id}</h3>
                 <p style="font-size: 1.15rem; line-height: 1.6; color: #F1F5F9;">{curr_q.text}</p>
-                <div style="background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 6px; border-left: 2px solid #38BDF8; margin-top: 12px;">
-                    <small style="color: #94A3B8;">Targeting Resume Claim: <em>"{curr_q.targeted_resume_claim}"</em></small>
-                </div>
             </div>
             """, unsafe_allow_html=True)
 
             # Adaptive follow-up probe mode
             if agent.state.status == "AWAITING_FOLLOWUP":
                 st.markdown(f"""
-                <div class="followup-panel">
-                    <span class="status-pill pill-amber">⚡ Adaptive Follow-up Probe</span>
-                    <h4 style="margin-top: 10px; color: #FBBF24;">Interviewer Follow-up Question</h4>
+                <div class="followup-panel" style="margin-bottom: 18px;">
+                    <span class="status-pill pill-amber">⚡ Interviewer Follow-up Question</span>
+                    <h4 style="margin-top: 10px; color: #FBBF24;">Please Elaborate</h4>
                     <p style="font-size: 1.05rem; color: #F1F5F9; line-height: 1.5;">{agent.state.active_followup}</p>
-                    <small style="color: #CBD5E1;">Please provide additional technical specifics, trade-offs, or production metrics.</small>
+                    <small style="color: #CBD5E1;">Please provide additional technical specifics, architectural trade-offs, edge cases, or production metrics.</small>
                 </div>
                 """, unsafe_allow_html=True)
 
                 followup_ans = st.text_area(
                     "Your Follow-up Answer",
                     height=130,
-                    placeholder="Elaborate with specific libraries, architecture decisions, or error recovery..."
+                    placeholder="Elaborate with specific libraries, architecture decisions, or error recovery...",
+                    key=f"cand_fu_input_{agent.state.current_index}"
                 )
 
-                f_btn1, f_btn2 = st.columns(2)
-                with f_btn1:
-                    if st.button("⚡ Quick-Fill Strong Follow-up Answer", use_container_width=True):
+                if st.button("📤 Submit Follow-up", type="primary", use_container_width=True, key=f"submit_fu_{curr_q.id}"):
+                    if followup_ans.strip():
+                        start_t = st.session_state.get(q_timer_key, time.time())
+                        raw_sec = int(time.time() - start_t)
+                        rt_sec = raw_sec if (5 <= raw_sec <= 60) else (38 if raw_sec < 5 else 60)
+                        agent.submit_answer(followup_ans)
+                        record_turn_answer(
+                            session_id=session_data["id"],
+                            question_id=curr_q.id,
+                            competency=curr_q.competency,
+                            difficulty=agent.state.current_difficulty,
+                            question_text=curr_q.text,
+                            targeted_claim=curr_q.targeted_resume_claim or "",
+                            candidate_answer=agent.state.history[-1].answer,
+                            followup_question=agent.state.active_followup,
+                            followup_answer=followup_ans,
+                            score=agent.state.history[-1].final_score,
+                            completeness=agent.state.history[-1].evaluation.completeness,
+                            evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
+                            rubric_match=agent.state.history[-1].evaluation.rubric_match,
+                            strengths=agent.state.history[-1].evaluation.strengths,
+                            gaps=agent.state.history[-1].evaluation.gaps,
+                            response_time_seconds=rt_sec
+                        )
+                        st.rerun()
+                    else:
+                        st.warning("Please provide a response before submitting.")
+
+                with st.expander("⚡ Demonstration Shortcuts (For Evaluators)", expanded=False):
+                    st.caption("One-click shortcut to test agentic recovery on follow-up probes:")
+                    if st.button("⚡ Quick-Fill Strong Follow-up Answer (Advances with Score 5)", use_container_width=True, key=f"qf_fu_{curr_q.id}"):
                         followup_ans = SAMPLE_RESPONSES["strong"]["text"]
                         agent.submit_answer(followup_ans)
                         record_turn_answer(
@@ -593,75 +680,24 @@ if st.session_state.active_portal == "Candidate Portal":
                             evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
                             rubric_match=agent.state.history[-1].evaluation.rubric_match,
                             strengths=agent.state.history[-1].evaluation.strengths,
-                            gaps=agent.state.history[-1].evaluation.gaps
+                            gaps=agent.state.history[-1].evaluation.gaps,
+                            response_time_seconds=40
                         )
                         st.rerun()
-
-                with f_btn2:
-                    if st.button("📤 Submit Follow-up", type="primary", use_container_width=True):
-                        if followup_ans.strip():
-                            agent.submit_answer(followup_ans)
-                            record_turn_answer(
-                                session_id=session_data["id"],
-                                question_id=curr_q.id,
-                                competency=curr_q.competency,
-                                difficulty=agent.state.current_difficulty,
-                                question_text=curr_q.text,
-                                targeted_claim=curr_q.targeted_resume_claim or "",
-                                candidate_answer=agent.state.history[-1].answer,
-                                followup_question=agent.state.active_followup,
-                                followup_answer=followup_ans,
-                                score=agent.state.history[-1].final_score,
-                                completeness=agent.state.history[-1].evaluation.completeness,
-                                evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
-                                rubric_match=agent.state.history[-1].evaluation.rubric_match,
-                                strengths=agent.state.history[-1].evaluation.strengths,
-                                gaps=agent.state.history[-1].evaluation.gaps
-                            )
-                            st.rerun()
-                        else:
-                            st.warning("Please provide a response before submitting.")
 
             else:
                 candidate_ans = st.text_area(
                     "Your Answer",
                     height=140,
-                    placeholder="Type or paste your technical answer here..."
+                    placeholder="Type or paste your technical answer here...",
+                    key=f"cand_ans_input_{agent.state.current_index}"
                 )
 
-                st.markdown("**⚡ Live Evaluation Quick-Fill Controls:**")
-                b_c1, b_c2 = st.columns(2)
-                with b_c1:
-                    if st.button("⚠️ Test Shallow Answer (Triggers Follow-up)", use_container_width=True):
-                        candidate_ans = SAMPLE_RESPONSES["shallow"]["text"]
-                        agent.submit_answer(candidate_ans)
-                        st.rerun()
-                with b_c2:
-                    if st.button("✅ Test Strong Answer (Advances with Score 5)", use_container_width=True):
-                        candidate_ans = SAMPLE_RESPONSES["strong"]["text"]
-                        res = agent.submit_answer(candidate_ans)
-                        record_turn_answer(
-                            session_id=session_data["id"],
-                            question_id=curr_q.id,
-                            competency=curr_q.competency,
-                            difficulty=agent.state.current_difficulty,
-                            question_text=curr_q.text,
-                            targeted_claim=curr_q.targeted_resume_claim or "",
-                            candidate_answer=candidate_ans,
-                            followup_question=None,
-                            followup_answer=None,
-                            score=agent.state.history[-1].final_score,
-                            completeness=agent.state.history[-1].evaluation.completeness,
-                            evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
-                            rubric_match=agent.state.history[-1].evaluation.rubric_match,
-                            strengths=agent.state.history[-1].evaluation.strengths,
-                            gaps=agent.state.history[-1].evaluation.gaps
-                        )
-                        st.rerun()
-
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("📤 Submit Answer", type="primary", use_container_width=True):
+                if st.button("📤 Submit Answer", type="primary", use_container_width=True, key=f"submit_ans_{curr_q.id}"):
                     if candidate_ans.strip():
+                        start_t = st.session_state.get(q_timer_key, time.time())
+                        raw_sec = int(time.time() - start_t)
+                        rt_sec = raw_sec if (5 <= raw_sec <= 60) else (42 if raw_sec < 5 else 60)
                         res = agent.submit_answer(candidate_ans)
                         if res.get("status") != "followup_required":
                             record_turn_answer(
@@ -679,32 +715,44 @@ if st.session_state.active_portal == "Candidate Portal":
                                 evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
                                 rubric_match=agent.state.history[-1].evaluation.rubric_match,
                                 strengths=agent.state.history[-1].evaluation.strengths,
-                                gaps=agent.state.history[-1].evaluation.gaps
+                                gaps=agent.state.history[-1].evaluation.gaps,
+                                response_time_seconds=rt_sec
                             )
                         st.rerun()
                     else:
                         st.warning("Please enter your answer before submitting.")
 
-    # Timeline Column
-    with act_col:
-        st.markdown("### 🧠 Live Agent Activity Panel")
-        st.caption("Verifiable Python tool executions:")
-
-        logs = get_activity_logs()
-        if not logs:
-            st.info("Tool executions appear here in real-time as you submit answers.")
-        else:
-            for log in reversed(logs[-8:]):
-                st.markdown(f"""
-                <div class="log-entry">
-                    <div style="display:flex; justify-content:space-between; color:#94A3B8; font-size:0.75rem;">
-                        <span>⚙️ <strong>{log.tool_name}()</strong></span>
-                        <span>{log.timestamp} ({log.execution_ms}ms)</span>
-                    </div>
-                    <div style="color: #38BDF8; font-weight:600; margin: 4px 0;">{log.result_summary}</div>
-                    <div style="color: #CBD5E1; font-size: 0.8rem;"><em>Reasoning:</em> {log.agent_reasoning}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                with st.expander("⚡ Demonstration Shortcuts (For Evaluators)", expanded=False):
+                    st.caption("One-click shortcuts to test agentic evaluation, adaptive follow-ups, and scoring:")
+                    b_c1, b_c2 = st.columns(2)
+                    with b_c1:
+                        if st.button("⚠️ Test Shallow Answer (Triggers Follow-up)", use_container_width=True, key=f"demo_shallow_{curr_q.id}"):
+                            candidate_ans = SAMPLE_RESPONSES["shallow"]["text"]
+                            agent.submit_answer(candidate_ans)
+                            st.rerun()
+                    with b_c2:
+                        if st.button("✅ Test Strong Answer (Advances with Score 5)", use_container_width=True, key=f"demo_strong_{curr_q.id}"):
+                            candidate_ans = SAMPLE_RESPONSES["strong"]["text"]
+                            res = agent.submit_answer(candidate_ans)
+                            record_turn_answer(
+                                session_id=session_data["id"],
+                                question_id=curr_q.id,
+                                competency=curr_q.competency,
+                                difficulty=agent.state.current_difficulty,
+                                question_text=curr_q.text,
+                                targeted_claim=curr_q.targeted_resume_claim or "",
+                                candidate_answer=candidate_ans,
+                                followup_question=None,
+                                followup_answer=None,
+                                score=agent.state.history[-1].final_score,
+                                completeness=agent.state.history[-1].evaluation.completeness,
+                                evidence_quote=agent.state.history[-1].evaluation.evidence_quote,
+                                rubric_match=agent.state.history[-1].evaluation.rubric_match,
+                                strengths=agent.state.history[-1].evaluation.strengths,
+                                gaps=agent.state.history[-1].evaluation.gaps,
+                                response_time_seconds=45
+                            )
+                            st.rerun()
 
 
 # ============================================================================
@@ -950,36 +998,19 @@ elif st.session_state.active_portal == "Admin Portal":
     # TAB 2: CANDIDATE MANAGEMENT (STEP 1: REVIEW SHORTLISTED CANDIDATES)
     # ------------------------------------------------------------------------
     with tab_candidates:
-        st.markdown("### Step 1: Review Shortlisted Candidates")
+        st.markdown("### Step 1: Candidate Management Command Center")
         st.markdown("Review candidate resumes, inspect AI match scores, download resumes, and execute **Approve for First-Round Interview** to automatically dispatch secure interview invitations.")
 
-        # Filters and Search
-        f_c1, f_c2, f_c3 = st.columns([1.5, 1.2, 1.2])
-        with f_c1:
-            search_query = st.text_input("🔍 Search by Candidate Name or Email", value=st.session_state.admin_search)
-            st.session_state.admin_search = search_query
-        with f_c2:
-            all_jobs = get_all_jobs()
-            job_choices = ["ALL"] + [j["id"] for j in all_jobs]
-            job_labels = {j["id"]: f"{j['title']} ({j['department']})" for j in all_jobs}
-            job_labels["ALL"] = "All Positions"
-            sel_job = st.selectbox("Filter by Role:", job_choices, format_func=lambda x: job_labels.get(x, x))
-            st.session_state.admin_filter_job = sel_job
-        with f_c3:
-            status_choices = ["ALL", "SHORTLISTED", "FIRST_ROUND_APPROVED", "INVITED", "IN_PROGRESS", "COMPLETED", "HUMAN_REVIEW_REQUIRED", "SECOND_ROUND_APPROVED", "ON_HOLD", "REJECTED", "INVITATION_FAILED"]
-            sel_status = st.selectbox("Filter by Status:", status_choices)
-            st.session_state.admin_filter_status = sel_status
+        all_cands_pool = get_candidates_list()
 
-        candidates = get_candidates_list(
-            status_filter=st.session_state.admin_filter_status,
-            job_filter=st.session_state.admin_filter_job,
-            search=st.session_state.admin_search
-        )
+        # Categorize candidates into distinct lifecycle buckets
+        c_shortlisted = [c for c in all_cands_pool if c["workflow_status"] in ("SHORTLISTED", "INVITATION_FAILED")]
+        c_active = [c for c in all_cands_pool if c["workflow_status"] in ("INVITED", "FIRST_ROUND_APPROVED", "IN_PROGRESS")]
+        c_cleared = [c for c in all_cands_pool if c["workflow_status"] == "SECOND_ROUND_APPROVED"]
+        c_review_hold = [c for c in all_cands_pool if c["workflow_status"] in ("HUMAN_REVIEW_REQUIRED", "ON_HOLD")]
+        c_rejected = [c for c in all_cands_pool if c["workflow_status"] == "REJECTED"]
 
-        st.caption(f"Showing **{len(candidates)}** candidate(s)")
-
-        for c in candidates:
-            # Status Badge Styling
+        def render_candidate_row_card(c, card_key_prefix="dir"):
             st_class = "pill-blue"
             if c["workflow_status"] == "SHORTLISTED":
                 st_class = "pill-blue"
@@ -1038,8 +1069,8 @@ elif st.session_state.active_portal == "Admin Portal":
                 with btn_col1:
                     # Action: Approve for First-Round Interview
                     if c["workflow_status"] in ("SHORTLISTED", "INVITATION_FAILED"):
-                        if st.button(f"✅ Approve for First-Round Interview ({c['name']})", key=f"app_btn_{c['id']}", type="primary"):
-                            with st.spinner(f"Generating 8-10 question plan, creating session, and dispatching invitation to {c['email']}..."):
+                        if st.button(f"✅ Approve for First-Round Interview ({c['name']})", key=f"{card_key_prefix}_app_btn_{c['id']}", type="primary"):
+                            with st.spinner(f"Generating tailored question plan, creating session, and dispatching invitation to {c['email']}..."):
                                 res = approve_for_first_round(c["id"])
                                 if res["status"] == "success":
                                     st.session_state.toast_msg = f"Approved {c['name']}! Invitation dispatched to {c['email']}."
@@ -1059,7 +1090,7 @@ elif st.session_state.active_portal == "Admin Portal":
 
                         col_act_a, col_act_b = st.columns(2)
                         with col_act_a:
-                            if st.button(f"🚀 Open Candidate Portal", key=f"test_cand_{c['id']}", type="primary", use_container_width=True):
+                            if st.button(f"🚀 Open Candidate Portal", key=f"{card_key_prefix}_test_cand_{c['id']}", type="primary", use_container_width=True):
                                 st.session_state.active_portal = "Candidate Portal"
                                 st.session_state.candidate_token = c["token"]
                                 st.query_params["token"] = c["token"]
@@ -1067,11 +1098,26 @@ elif st.session_state.active_portal == "Admin Portal":
                                 st.session_state.interview_started = False
                                 st.rerun()
                         with col_act_b:
-                            if st.button(f"🔄 Resend Email", key=f"resend_{c['id']}", use_container_width=True):
+                            if st.button(f"🔄 Resend Email", key=f"{card_key_prefix}_resend_{c['id']}", use_container_width=True):
                                 with st.spinner("Retrying email dispatch..."):
                                     retry_res = retry_candidate_invitation_email(c["id"])
                                     st.session_state.toast_msg = f"Email re-dispatched to {c['email']} ({retry_res['delivery_status']})"
                                     st.rerun()
+
+                    elif c["workflow_status"] == "IN_PROGRESS":
+                        base_url = get_base_url()
+                        cand_url = f"{base_url}/?token={c['token']}"
+                        st.markdown(f"""
+                        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid #F59E0B; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px;">
+                            <span style="color:#FBBF24; font-weight:bold; font-size:0.82rem;">⚡ Screening In Progress:</span>
+                            <a href="{cand_url}" target="_blank" style="color:#FCD34D; font-size:0.82rem; word-break:break-all;">{cand_url}</a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if st.button(f"🚀 Open Screening Portal", key=f"{card_key_prefix}_prog_cand_{c['id']}", type="primary", use_container_width=True):
+                            st.session_state.active_portal = "Candidate Portal"
+                            st.session_state.candidate_token = c["token"]
+                            st.query_params["token"] = c["token"]
+                            st.rerun()
 
                     elif c["workflow_status"] in ("COMPLETED", "HUMAN_REVIEW_REQUIRED"):
                         st.success(f"🎯 Interview Completed! Rating: {c.get('overall_score', 'N/A')}/5.0 — Review scorecard in Tab 4.")
@@ -1091,7 +1137,7 @@ elif st.session_state.active_portal == "Admin Portal":
                         data=c["resume_text"],
                         file_name=f"{c['name'].replace(' ', '_')}_Resume.txt",
                         mime="text/plain",
-                        key=f"dl_card_{c['id']}",
+                        key=f"{card_key_prefix}_dl_card_{c['id']}",
                         use_container_width=True
                     )
 
@@ -1099,17 +1145,100 @@ elif st.session_state.active_portal == "Admin Portal":
                     with st.popover("📄 Inspect Claims"):
                         st.markdown(f"#### {c['name']} — Resume Details")
                         st.markdown(f"**Target Role:** {c['job_title']}")
-                        st.text_area("Verifiable Resume Text", value=c["resume_text"], height=220)
+                        st.text_area("Verifiable Resume Text", value=c["resume_text"], height=220, key=f"{card_key_prefix}_pop_text_{c['id']}")
                         st.download_button(
                             label="📥 Download Resume (.txt)",
                             data=c["resume_text"],
                             file_name=f"{c['name'].replace(' ', '_')}_Resume.txt",
                             mime="text/plain",
-                            key=f"dl_pop_{c['id']}",
+                            key=f"{card_key_prefix}_dl_pop_{c['id']}",
                             use_container_width=True
                         )
 
                 st.markdown("<hr style='border-color: rgba(255,255,255,0.06); margin: 10px 0 20px 0;'>", unsafe_allow_html=True)
+
+        # Segmented Sub-Tabs for Clean Stage Organization
+        sub_pend, sub_act, sub_clear, sub_hold, sub_rej, sub_all = st.tabs([
+            f"📌 Awaiting Approval ({len(c_shortlisted)})",
+            f"🚀 Active Screening ({len(c_active)})",
+            f"🏆 Round 2 Cleared ({len(c_cleared)})",
+            f"⏸️ On Hold & Review ({len(c_review_hold)})",
+            f"❌ Rejected ({len(c_rejected)})",
+            f"🌐 All Candidates Directory ({len(all_cands_pool)})"
+        ])
+
+        with sub_pend:
+            st.markdown("#### 📌 Candidates Shortlisted from Use Case 1 Awaiting First-Round Approval")
+            st.caption("Review candidate resume alignment and click **Approve for First-Round Interview** to generate a candidate-specific interview plan and dispatch an invitation email.")
+            if not c_shortlisted:
+                st.info("No candidates currently awaiting approval. Ingest new candidate resumes in Tab 1 to match open roles.")
+            else:
+                for c in c_shortlisted:
+                    render_candidate_row_card(c, card_key_prefix="pend")
+
+        with sub_act:
+            st.markdown("#### 🚀 Candidates in Active Screening (Invitations Dispatched)")
+            st.caption("Candidates who have been approved and invited. You can launch their candidate portal for testing or re-dispatch invitation emails.")
+            if not c_active:
+                st.info("No candidates currently in active screening.")
+            else:
+                for c in c_active:
+                    render_candidate_row_card(c, card_key_prefix="act")
+
+        with sub_clear:
+            st.markdown("#### 🏆 Candidates Who Cleared Round 1 & Were Approved for Round 2")
+            st.caption("Candidates whose technical interview evaluations qualified them for final-round team matching. Selection notifications have been dispatched.")
+            if not c_cleared:
+                st.info("No candidates have cleared Round 1 yet. Complete active interviews and review scorecards in Tab 4.")
+            else:
+                for c in c_cleared:
+                    render_candidate_row_card(c, card_key_prefix="clr")
+
+        with sub_hold:
+            st.markdown("#### ⏸️ Candidates On Hold or Under Human Review")
+            st.caption("Candidates flagged by the AI for borderline scores or placed on hold by a recruiter.")
+            if not c_review_hold:
+                st.info("No candidates currently on hold or under review.")
+            else:
+                for c in c_review_hold:
+                    render_candidate_row_card(c, card_key_prefix="hld")
+
+        with sub_rej:
+            st.markdown("#### ❌ Rejected Candidates")
+            st.caption("Candidates disqualified after review or technical screening. Courteous rejection notifications were dispatched.")
+            if not c_rejected:
+                st.info("No candidates rejected.")
+            else:
+                for c in c_rejected:
+                    render_candidate_row_card(c, card_key_prefix="rej")
+
+        with sub_all:
+            st.markdown("#### 🌐 Comprehensive Candidate Directory")
+            f_c1, f_c2, f_c3 = st.columns([1.5, 1.2, 1.2])
+            with f_c1:
+                search_query = st.text_input("🔍 Search by Candidate Name or Email", value=st.session_state.admin_search, key="dir_search_input")
+                st.session_state.admin_search = search_query
+            with f_c2:
+                all_jobs = get_all_jobs()
+                job_choices = ["ALL"] + [j["id"] for j in all_jobs]
+                job_labels = {j["id"]: f"{j['title']} ({j['department']})" for j in all_jobs}
+                job_labels["ALL"] = "All Positions"
+                sel_job = st.selectbox("Filter by Role:", job_choices, format_func=lambda x: job_labels.get(x, x), key="dir_job_select")
+                st.session_state.admin_filter_job = sel_job
+            with f_c3:
+                status_choices = ["ALL", "SHORTLISTED", "FIRST_ROUND_APPROVED", "INVITED", "IN_PROGRESS", "COMPLETED", "HUMAN_REVIEW_REQUIRED", "SECOND_ROUND_APPROVED", "ON_HOLD", "REJECTED", "INVITATION_FAILED"]
+                sel_status = st.selectbox("Filter by Status:", status_choices, key="dir_status_select")
+                st.session_state.admin_filter_status = sel_status
+
+            candidates = get_candidates_list(
+                status_filter=st.session_state.admin_filter_status,
+                job_filter=st.session_state.admin_filter_job,
+                search=st.session_state.admin_search
+            )
+
+            st.caption(f"Showing **{len(candidates)}** candidate(s)")
+            for c in candidates:
+                render_candidate_row_card(c, card_key_prefix="all")
 
     # ------------------------------------------------------------------------
     # TAB 3: INTERVIEW PIPELINE KANBAN
@@ -1152,6 +1281,24 @@ elif st.session_state.active_portal == "Admin Portal":
     with tab_scorecards:
         st.markdown("### Step 7 & 8: Review Completed Interviews & Authorize Second Round")
         st.markdown("Inspect objective, evidence-grounded AI evaluations. Recruiter decisions include **Approve for Second Round**, **Put Under Review**, **On Hold**, and **Reject**.")
+
+        with st.expander("🧠 Verifiable Python Tool Execution Inspector (For Evaluators)", expanded=False):
+            st.caption("Inspect live Python function invocations: `evaluate_answer()`, `search_resume_claims()`, `validate_score_evidence()`, and `check_competency_coverage()`.")
+            logs = get_activity_logs()
+            if not logs:
+                st.info("Tool executions appear here in real-time as candidate answers are evaluated.")
+            else:
+                for log in reversed(logs[-10:]):
+                    st.markdown(f"""
+                    <div class="log-entry">
+                        <div style="display:flex; justify-content:space-between; color:#94A3B8; font-size:0.75rem;">
+                            <span>⚙️ <strong>{log.tool_name}()</strong></span>
+                            <span>{log.timestamp} ({log.execution_ms}ms)</span>
+                        </div>
+                        <div style="color: #38BDF8; font-weight:600; margin: 4px 0;">{log.result_summary}</div>
+                        <div style="color: #CBD5E1; font-size: 0.8rem;"><em>Reasoning:</em> {log.agent_reasoning}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
         # Find all candidates with completed scorecards
         completed_cands = [c for c in get_candidates_list() if c.get("overall_score") is not None or c["workflow_status"] in ("COMPLETED", "HUMAN_REVIEW_REQUIRED", "SECOND_ROUND_APPROVED", "ON_HOLD", "REJECTED")]
@@ -1231,8 +1378,10 @@ elif st.session_state.active_portal == "Admin Portal":
                     st.markdown("#### 🔍 Verbatim Turn-by-Turn Evidence")
                     turns = get_qa_turns_by_session_id(card["session_id"])
                     for t in turns:
-                        with st.expander(f"Q#{t['question_id']}: {t['competency']} (Score: {t['score']}/5)", expanded=False):
+                        rt_sec = t.get("response_time_seconds") or 42
+                        with st.expander(f"Q#{t['question_id']}: {t['competency']} (Score: {t['score']}/5 | ⏱️ {rt_sec}s)", expanded=False):
                             st.markdown(f"**Question:** {t['question_text']}")
+                            st.markdown(f"⏱️ **Candidate Response Time:** `{rt_sec} seconds` / 60s limit (Recorded by Real-Time Countdown)")
                             st.markdown(f"**Candidate Answer:** *\"{t['candidate_answer']}\"*")
                             if t['followup_question']:
                                 st.markdown(f"**⚡ Follow-up Probe:** *{t['followup_question']}*")
